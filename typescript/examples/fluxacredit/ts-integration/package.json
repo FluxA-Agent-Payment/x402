@@ -1,0 +1,16 @@
+{
+  "name": "x402-fluxacredit-ts-integration",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx run-all.ts"
+  },
+  "dependencies": {
+    "@x402/core": "workspace:*",
+    "@x402/fluxa": "workspace:*",
+    "typescript": "^5.7.3",
+    "tsx": "^4.19.2",
+    "web-bot-auth": "^0.1.0"
+  }
+}
+

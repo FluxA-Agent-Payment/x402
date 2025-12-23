@@ -1,0 +1,86 @@
+{
+  "name": "@x402/fluxa",
+  "version": "0.1.0",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/cjs/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint . --ext .ts --fix",
+    "lint:check": "eslint . --ext .ts"
+  },
+  "keywords": [
+    "x402",
+    "payment",
+    "protocol",
+    "fluxa",
+    "credits"
+  ],
+  "license": "Apache-2.0",
+  "repository": "https://github.com/coinbase/x402",
+  "description": "x402 Payment Protocol implementation for FluxA credits (fluxacredit)",
+  "devDependencies": {
+    "@eslint/js": "^9.24.0",
+    "@types/node": "^22.13.4",
+    "@typescript-eslint/eslint-plugin": "^8.29.1",
+    "@typescript-eslint/parser": "^8.29.1",
+    "eslint": "^9.24.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-jsdoc": "^50.6.9",
+    "eslint-plugin-prettier": "^5.2.6",
+    "prettier": "3.5.2",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@x402/core": "workspace:*",
+    "tweetnacl": "^1.0.3"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.mts",
+        "default": "./dist/esm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./credit/client": {
+      "import": {
+        "types": "./dist/esm/credit/client/index.d.mts",
+        "default": "./dist/esm/credit/client/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/credit/client/index.d.ts",
+        "default": "./dist/cjs/credit/client/index.js"
+      }
+    },
+    "./credit/server": {
+      "import": {
+        "types": "./dist/esm/credit/server/index.d.mts",
+        "default": "./dist/esm/credit/server/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/credit/server/index.d.ts",
+        "default": "./dist/cjs/credit/server/index.js"
+      }
+    },
+    "./credit/facilitator": {
+      "import": {
+        "types": "./dist/esm/credit/facilitator/index.d.mts",
+        "default": "./dist/esm/credit/facilitator/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/credit/facilitator/index.d.ts",
+        "default": "./dist/cjs/credit/facilitator/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ]
+}
