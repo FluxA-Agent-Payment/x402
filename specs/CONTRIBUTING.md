@@ -43,6 +43,7 @@ Schemes define how funds are transferred from client to server. Each scheme has:
 
 Current schemes:
 - `exact` - Transfers a specific amount for resource access
+- `odp-deferred` - Session-based deferred settlement with signed receipts and batching
 
 ### Transports
 
@@ -191,4 +192,3 @@ For schemes, include a section on:
 - Open an issue for spec questions
 - Reference existing specs for patterns
 - Discuss in the proposal issue before extensive writing
-

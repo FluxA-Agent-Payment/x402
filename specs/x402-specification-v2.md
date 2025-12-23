@@ -310,6 +310,12 @@ For Solana (SVM), the `exact` scheme is implemented using `TransferChecked` for 
 
 Full SVM details are specified in `specs/schemes/exact/scheme_exact_svm.md`.
 
+**6.3 Open Deferred Payment (ODP overview)**
+
+`odp-deferred` is a session-based deferred settlement scheme for high-frequency micro-payments. Clients sign a SessionApproval once per session and a Receipt per request. Servers verify receipts immediately and settle later in batches.
+
+Full scheme details are specified in `specs/schemes/odp-deferred/scheme_odp_deferred.md` and `specs/schemes/odp-deferred/scheme_odp_deferred_evm.md`.
+
 **7. Facilitator Interface**
 
 The facilitator provides HTTP REST APIs for payment verification and settlement. This allows resource servers to delegate blockchain operations to trusted third parties or host the endpoints themselves. Note that while the core x402 protocol is transport-agnostic, facilitator APIs are currently standardized as HTTP endpoints.
