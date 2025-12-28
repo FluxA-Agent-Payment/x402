@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ExactEvmScheme } from "../../src";
+import { ExactEvmScheme, OdpDeferredEvmScheme } from "../../src";
 import { ExactEvmScheme as ClientExactEvmScheme } from "../../src/exact/client/scheme";
 import { ExactEvmScheme as ServerExactEvmScheme } from "../../src/exact/server/scheme";
 import { ExactEvmScheme as FacilitatorExactEvmScheme } from "../../src/exact/facilitator/scheme";
@@ -36,5 +36,10 @@ describe("@x402/evm", () => {
     };
     const facilitator = new FacilitatorExactEvmScheme(mockSigner as any);
     expect(facilitator.scheme).toBe("exact");
+  });
+
+  it("should export OdpDeferredEvmScheme", () => {
+    expect(OdpDeferredEvmScheme).toBeDefined();
+    expect(typeof OdpDeferredEvmScheme).toBe("function");
   });
 });

@@ -3,6 +3,7 @@ packages:
   - "servers/*"
   - "fullstack/*"
   - "facilitator"
+  - "odp-deferred"
   - "legacy/facilitator"
   - "legacy/servers/*"
   - "legacy/clients/*"

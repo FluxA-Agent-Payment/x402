@@ -3,18 +3,17 @@ import { withX402 } from "@x402/next";
 import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import { registerExactEvmScheme } from "@x402/evm/exact/server";
 
-const facilitatorUrl = process.env.FACILITATOR_URL;
-export const evmAddress = process.env.EVM_ADDRESS as `0x${string}`;
+const envFacilitatorUrl = process.env.FACILITATOR_URL;
+const envEvmAddress = process.env.EVM_ADDRESS as `0x${string}` | undefined;
 
-if (!facilitatorUrl) {
-  console.error("❌ FACILITATOR_URL environment variable is required");
-  process.exit(1);
+if (!envFacilitatorUrl || !envEvmAddress) {
+  console.warn(
+    "WARN: FACILITATOR_URL and EVM_ADDRESS are required to run this example. Using defaults for build.",
+  );
 }
 
-if (!evmAddress) {
-  console.error("❌ EVM_ADDRESS environment variable is required");
-  process.exit(1);
-}
+const facilitatorUrl = envFacilitatorUrl ?? "http://localhost:4022";
+export const evmAddress = envEvmAddress ?? "0x0000000000000000000000000000000000000000";
 
 // Create HTTP facilitator client
 const facilitatorClient = new HTTPFacilitatorClient({ url: facilitatorUrl });

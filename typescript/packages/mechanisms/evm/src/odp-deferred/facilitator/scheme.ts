@@ -1,0 +1,509 @@
+import {
+  PaymentPayload,
+  PaymentRequirements,
+  SchemeNetworkFacilitator,
+  SettleResponse,
+  VerifyResponse,
+} from "@x402/core/types";
+import { encodePacked, getAddress, isAddressEqual, keccak256 } from "viem";
+import { FacilitatorEvmSigner } from "../../signer";
+import {
+  OdpDeferredEvmPayloadV2,
+  OdpDeferredReceipt,
+  OdpDeferredSessionApproval,
+} from "../../types";
+import { odpReceiptTypes, odpSessionApprovalTypes } from "../constants";
+import { InMemoryOdpDeferredStore, OdpDeferredStore } from "../store";
+import {
+  hashAuthorizedProcessors,
+  normalizeRequestHash,
+  parseOdpDeferredExtras,
+} from "../utils";
+
+export interface OdpDeferredEvmSchemeConfig {
+  settlementContract: `0x${string}`;
+  authorizedProcessors?: `0x${string}`[];
+  store?: OdpDeferredStore;
+}
+
+export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
+  readonly scheme = "odp-deferred";
+  readonly caipFamily = "eip155:*";
+  private readonly config: OdpDeferredEvmSchemeConfig;
+  private readonly store: OdpDeferredStore;
+
+  constructor(private readonly signer: FacilitatorEvmSigner, config: OdpDeferredEvmSchemeConfig) {
+    this.config = {
+      settlementContract: getAddress(config.settlementContract),
+      authorizedProcessors: config.authorizedProcessors?.map(address => getAddress(address)),
+      store: config.store,
+    };
+    this.store = config.store ?? new InMemoryOdpDeferredStore();
+  }
+
+  getExtra(_: string): Record<string, unknown> | undefined {
+    return {
+      settlementContract: this.config.settlementContract,
+      authorizedProcessors: this.config.authorizedProcessors,
+    };
+  }
+
+  getSigners(_: string): string[] {
+    return [...this.signer.getAddresses()];
+  }
+
+  async verify(
+    payload: PaymentPayload,
+    requirements: PaymentRequirements,
+  ): Promise<VerifyResponse> {
+    const odpPayload = payload.payload as OdpDeferredEvmPayloadV2;
+
+    if (payload.accepted.scheme !== this.scheme || requirements.scheme !== this.scheme) {
+      return {
+        isValid: false,
+        invalidReason: "unsupported_scheme",
+      };
+    }
+
+    if (payload.accepted.network !== requirements.network) {
+      return {
+        isValid: false,
+        invalidReason: "network_mismatch",
+      };
+    }
+
+    let extras;
+    try {
+      extras = parseOdpDeferredExtras(requirements.extra);
+    } catch (error) {
+      return {
+        isValid: false,
+        invalidReason: error instanceof Error ? error.message : "invalid_requirements_extra",
+      };
+    }
+
+    if (!odpPayload?.receipt) {
+      return {
+        isValid: false,
+        invalidReason: "invalid_odp_payload_missing_receipt",
+      };
+    }
+
+    if (!odpPayload.receiptSignature) {
+      return {
+        isValid: false,
+        invalidReason: "missing_receipt_signature",
+      };
+    }
+
+    if (odpPayload.receipt.sessionId !== extras.sessionId) {
+      return {
+        isValid: false,
+        invalidReason: "session_id_mismatch",
+      };
+    }
+
+    if (getAddress(extras.settlementContract) !== this.config.settlementContract) {
+      return {
+        isValid: false,
+        invalidReason: "settlement_contract_mismatch",
+      };
+    }
+
+    const receipt = odpPayload.receipt as OdpDeferredReceipt;
+    const sessionId = receipt.sessionId;
+    const chainId = this.getChainId(requirements.network);
+
+    let sessionRecord = this.store.getSession(sessionId);
+    let approval: OdpDeferredSessionApproval | undefined = sessionRecord?.approval;
+
+    if (odpPayload.sessionApproval) {
+      if (!odpPayload.sessionSignature) {
+        return {
+          isValid: false,
+          invalidReason: "missing_session_signature",
+        };
+      }
+
+      const sessionApproval = odpPayload.sessionApproval as OdpDeferredSessionApproval;
+      const expectedHash = hashAuthorizedProcessors(extras.authorizedProcessors);
+
+      if (sessionApproval.authorizedProcessorsHash !== expectedHash) {
+        return {
+          isValid: false,
+          invalidReason: "authorized_processors_hash_mismatch",
+        };
+      }
+
+      const approvalValid = await this.verifySessionApproval(
+        sessionApproval,
+        odpPayload.sessionSignature,
+        chainId,
+        extras.settlementContract,
+      );
+
+      if (!approvalValid) {
+        return {
+          isValid: false,
+          invalidReason: "invalid_session_signature",
+        };
+      }
+
+      if (
+        getAddress(sessionApproval.payee) !== getAddress(requirements.payTo) ||
+        getAddress(sessionApproval.asset) !== getAddress(requirements.asset) ||
+        sessionApproval.sessionId !== extras.sessionId ||
+        sessionApproval.startNonce !== extras.startNonce ||
+        sessionApproval.maxSpend !== extras.maxSpend ||
+        sessionApproval.expiry !== extras.expiry
+      ) {
+        return {
+          isValid: false,
+          invalidReason: "session_approval_mismatch",
+        };
+      }
+
+      approval = sessionApproval;
+
+      if (!sessionRecord) {
+        sessionRecord = {
+          approval: sessionApproval,
+          settlementContract: extras.settlementContract,
+          nextNonce: BigInt(sessionApproval.startNonce),
+          spent: 0n,
+          receipts: [],
+        };
+      } else if (
+        sessionRecord.approval.sessionId !== sessionApproval.sessionId ||
+        sessionRecord.approval.startNonce !== sessionApproval.startNonce ||
+        sessionRecord.approval.maxSpend !== sessionApproval.maxSpend ||
+        sessionRecord.approval.expiry !== sessionApproval.expiry ||
+        !isAddressEqual(sessionRecord.approval.payee, sessionApproval.payee) ||
+        !isAddressEqual(sessionRecord.approval.asset, sessionApproval.asset) ||
+        sessionRecord.approval.authorizedProcessorsHash !== sessionApproval.authorizedProcessorsHash
+      ) {
+        return {
+          isValid: false,
+          invalidReason: "session_approval_mismatch",
+        };
+      }
+    }
+
+    if (!approval || !sessionRecord) {
+      return {
+        isValid: false,
+        invalidReason: "missing_session_approval",
+      };
+    }
+
+    if (sessionRecord.settlementContract !== extras.settlementContract) {
+      return {
+        isValid: false,
+        invalidReason: "settlement_contract_mismatch",
+        payer: approval.payer,
+      };
+    }
+
+    if (
+      approval.sessionId !== extras.sessionId ||
+      approval.startNonce !== extras.startNonce ||
+      approval.maxSpend !== extras.maxSpend ||
+      approval.expiry !== extras.expiry ||
+      !isAddressEqual(approval.payee, getAddress(requirements.payTo)) ||
+      !isAddressEqual(approval.asset, getAddress(requirements.asset))
+    ) {
+      return {
+        isValid: false,
+        invalidReason: "requirements_session_mismatch",
+      };
+    }
+
+    if (!this.isAuthorizedProcessor(extras.authorizedProcessors)) {
+      return {
+        isValid: false,
+        invalidReason: "unauthorized_processor",
+      };
+    }
+
+    if (receipt.sessionId !== approval.sessionId) {
+      return {
+        isValid: false,
+        invalidReason: "session_id_mismatch",
+        payer: approval.payer,
+      };
+    }
+
+    const receiptSignatureValid = await this.verifyReceipt(
+      receipt,
+      odpPayload.receiptSignature,
+      approval.payer,
+      chainId,
+      extras.settlementContract,
+    );
+
+    if (!receiptSignatureValid) {
+      return {
+        isValid: false,
+        invalidReason: "invalid_receipt_signature",
+        payer: approval.payer,
+      };
+    }
+
+    if (receipt.nonce !== sessionRecord.nextNonce.toString()) {
+      return {
+        isValid: false,
+        invalidReason: "receipt_nonce_mismatch",
+        payer: approval.payer,
+      };
+    }
+
+    if (receipt.amount !== requirements.amount) {
+      return {
+        isValid: false,
+        invalidReason: "receipt_amount_mismatch",
+        payer: approval.payer,
+      };
+    }
+
+    if (extras.maxAmountPerReceipt) {
+      if (BigInt(receipt.amount) > BigInt(extras.maxAmountPerReceipt)) {
+        return {
+          isValid: false,
+          invalidReason: "receipt_amount_exceeds_max",
+          payer: approval.payer,
+        };
+      }
+    }
+
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const deadline = BigInt(receipt.deadline);
+    const expiry = BigInt(approval.expiry);
+    const timeoutLimit = now + BigInt(requirements.maxTimeoutSeconds);
+
+    if (deadline < now || deadline > timeoutLimit || deadline > expiry) {
+      return {
+        isValid: false,
+        invalidReason: "receipt_deadline_invalid",
+        payer: approval.payer,
+      };
+    }
+
+    if (expiry < now) {
+      return {
+        isValid: false,
+        invalidReason: "session_expired",
+        payer: approval.payer,
+      };
+    }
+
+    const requiredRequestHash = normalizeRequestHash(extras.requestHash);
+    if (receipt.requestHash !== requiredRequestHash) {
+      return {
+        isValid: false,
+        invalidReason: "request_hash_mismatch",
+        payer: approval.payer,
+      };
+    }
+
+    const nextSpend = sessionRecord.spent + BigInt(receipt.amount);
+    if (nextSpend > BigInt(approval.maxSpend)) {
+      return {
+        isValid: false,
+        invalidReason: "session_max_spend_exceeded",
+        payer: approval.payer,
+      };
+    }
+
+    sessionRecord.spent = nextSpend;
+    sessionRecord.nextNonce = sessionRecord.nextNonce + 1n;
+    sessionRecord.receipts.push(receipt);
+
+    this.store.setSession(sessionId, sessionRecord);
+
+    return {
+      isValid: true,
+      payer: approval.payer,
+    };
+  }
+
+  async settle(
+    payload: PaymentPayload,
+    requirements: PaymentRequirements,
+  ): Promise<SettleResponse> {
+    const odpPayload = payload.payload as OdpDeferredEvmPayloadV2;
+
+    if (!odpPayload?.receipt) {
+      return {
+        success: false,
+        errorReason: "invalid_odp_payload_missing_receipt",
+        transaction: "",
+        network: payload.accepted.network,
+      };
+    }
+
+    const receipt = odpPayload.receipt as OdpDeferredReceipt;
+
+    let extras;
+    try {
+      extras = parseOdpDeferredExtras(requirements.extra);
+    } catch (error) {
+      return {
+        success: false,
+        errorReason: error instanceof Error ? error.message : "invalid_requirements_extra",
+        transaction: "",
+        network: payload.accepted.network,
+      };
+    }
+
+    if (!this.isAuthorizedProcessor(extras.authorizedProcessors)) {
+      return {
+        success: false,
+        errorReason: "unauthorized_processor",
+        transaction: "",
+        network: payload.accepted.network,
+      };
+    }
+
+    const sessionRecord = this.store.getSession(receipt.sessionId);
+    if (!sessionRecord) {
+      return {
+        success: false,
+        errorReason: "session_not_found",
+        transaction: "",
+        network: payload.accepted.network,
+      };
+    }
+
+    const receipts = sessionRecord.receipts;
+    if (receipts.length === 0) {
+      return {
+        success: false,
+        errorReason: "no_receipts",
+        transaction: "",
+        network: payload.accepted.network,
+        payer: sessionRecord.approval.payer,
+      };
+    }
+
+    const total = receipts.reduce((sum, entry) => sum + BigInt(entry.amount), 0n);
+    const startNonce = BigInt(receipts[0].nonce);
+    const endNonce = BigInt(receipts[receipts.length - 1].nonce);
+
+    for (let i = 0; i < receipts.length; i += 1) {
+      const expected = startNonce + BigInt(i);
+      if (BigInt(receipts[i].nonce) !== expected) {
+        return {
+          success: false,
+          errorReason: "receipt_nonce_gap",
+          transaction: "",
+          network: payload.accepted.network,
+          payer: sessionRecord.approval.payer,
+        };
+      }
+    }
+
+    const txHash = keccak256(
+      encodePacked(
+        ["bytes32", "uint256", "uint256", "uint256"],
+        [receipt.sessionId, startNonce, endNonce, total],
+      ),
+    );
+
+    sessionRecord.receipts = [];
+    this.store.setSession(receipt.sessionId, sessionRecord);
+
+    return {
+      success: true,
+      transaction: txHash,
+      network: payload.accepted.network,
+      payer: sessionRecord.approval.payer,
+    };
+  }
+
+  private async verifySessionApproval(
+    approval: OdpDeferredSessionApproval,
+    signature: `0x${string}`,
+    chainId: number,
+    settlementContract: `0x${string}`,
+  ): Promise<boolean> {
+    try {
+      return await this.signer.verifyTypedData({
+        address: approval.payer,
+        domain: {
+          name: "x402-odp-deferred",
+          version: "1",
+          chainId,
+          verifyingContract: settlementContract,
+        },
+        types: odpSessionApprovalTypes,
+        primaryType: "SessionApproval",
+        message: {
+          payer: getAddress(approval.payer),
+          payee: getAddress(approval.payee),
+          asset: getAddress(approval.asset),
+          maxSpend: BigInt(approval.maxSpend),
+          expiry: BigInt(approval.expiry),
+          sessionId: approval.sessionId,
+          startNonce: BigInt(approval.startNonce),
+          authorizedProcessorsHash: approval.authorizedProcessorsHash,
+        },
+        signature,
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private async verifyReceipt(
+    receipt: OdpDeferredReceipt,
+    signature: `0x${string}`,
+    payer: `0x${string}`,
+    chainId: number,
+    settlementContract: `0x${string}`,
+  ): Promise<boolean> {
+    try {
+      return await this.signer.verifyTypedData({
+        address: payer,
+        domain: {
+          name: "x402-odp-deferred",
+          version: "1",
+          chainId,
+          verifyingContract: settlementContract,
+        },
+        types: odpReceiptTypes,
+        primaryType: "Receipt",
+        message: {
+          sessionId: receipt.sessionId,
+          nonce: BigInt(receipt.nonce),
+          amount: BigInt(receipt.amount),
+          deadline: BigInt(receipt.deadline),
+          requestHash: receipt.requestHash,
+        },
+        signature,
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private isAuthorizedProcessor(authorizedProcessors?: readonly `0x${string}`[]): boolean {
+    if (!authorizedProcessors || authorizedProcessors.length === 0) {
+      return true;
+    }
+
+    const signers = this.signer.getAddresses().map(address => getAddress(address));
+
+    return authorizedProcessors.some(allowed =>
+      signers.some(signer => isAddressEqual(signer, allowed)),
+    );
+  }
+
+  private getChainId(network: string): number {
+    const [, chainIdString] = network.split(":");
+    const chainId = Number(chainIdString);
+    if (!Number.isFinite(chainId)) {
+      throw new Error(`Invalid network for odp-deferred: ${network}`);
+    }
+    return chainId;
+  }
+}

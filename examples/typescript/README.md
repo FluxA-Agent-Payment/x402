@@ -42,6 +42,7 @@ Examples of different client implementations for interacting with X402 services:
 ### Facilitator
 
 - `facilitator/` - Example implementation of an x402 payment facilitator exposing `/verify` and `/settle`.
+- `odp-deferred/` - End-to-end example of the `odp-deferred` scheme with deferred settlement.
 
 ### Fullstack
 

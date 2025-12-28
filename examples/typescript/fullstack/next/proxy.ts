@@ -7,19 +7,19 @@ import { evmPaywall } from "@x402/paywall/evm";
 import { svmPaywall } from "@x402/paywall/svm";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 
-const facilitatorUrl = process.env.FACILITATOR_URL;
-export const evmAddress = process.env.EVM_ADDRESS as `0x${string}`;
-export const svmAddress = process.env.SVM_ADDRESS;
+const envFacilitatorUrl = process.env.FACILITATOR_URL;
+const envEvmAddress = process.env.EVM_ADDRESS as `0x${string}` | undefined;
+const envSvmAddress = process.env.SVM_ADDRESS;
 
-if (!facilitatorUrl) {
-  console.error("❌ FACILITATOR_URL environment variable is required");
-  process.exit(1);
+if (!envFacilitatorUrl || !envEvmAddress || !envSvmAddress) {
+  console.warn(
+    "WARN: FACILITATOR_URL, EVM_ADDRESS, and SVM_ADDRESS are required to run this example. Using defaults for build.",
+  );
 }
 
-if (!evmAddress || !svmAddress) {
-  console.error("❌ EVM_ADDRESS and SVM_ADDRESS environment variables are required");
-  process.exit(1);
-}
+const facilitatorUrl = envFacilitatorUrl ?? "http://localhost:4022";
+export const evmAddress = envEvmAddress ?? "0x0000000000000000000000000000000000000000";
+export const svmAddress = envSvmAddress ?? "11111111111111111111111111111111";
 
 // Create HTTP facilitator client
 const facilitatorClient = new HTTPFacilitatorClient({ url: facilitatorUrl });

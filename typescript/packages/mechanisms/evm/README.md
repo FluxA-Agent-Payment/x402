@@ -10,7 +10,7 @@ npm install @x402/evm
 
 ## Overview
 
-This package provides three main components for handling x402 payments on EVM-compatible blockchains:
+This package provides three main components for handling x402 payments on EVM-compatible blockchains, including the `exact` and `odp-deferred` schemes:
 
 - **Client** - For applications that need to make payments (have wallets/signers)
 - **Facilitator** - For payment processors that verify and execute on-chain transactions  

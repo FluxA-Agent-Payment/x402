@@ -8,5 +8,6 @@
 // The actual implementation logic will be added by copying from the core/src/schemes/evm folder
 
 export { ExactEvmScheme } from "./exact";
+export { OdpDeferredEvmScheme } from "./odp-deferred";
 export { toClientEvmSigner, toFacilitatorEvmSigner } from "./signer";
 export type { ClientEvmSigner, FacilitatorEvmSigner } from "./signer";

@@ -100,6 +100,36 @@
         "default": "./dist/cjs/exact/facilitator/index.js"
       }
     },
+    "./odp-deferred/client": {
+      "import": {
+        "types": "./dist/esm/odp-deferred/client/index.d.mts",
+        "default": "./dist/esm/odp-deferred/client/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/odp-deferred/client/index.d.ts",
+        "default": "./dist/cjs/odp-deferred/client/index.js"
+      }
+    },
+    "./odp-deferred/server": {
+      "import": {
+        "types": "./dist/esm/odp-deferred/server/index.d.mts",
+        "default": "./dist/esm/odp-deferred/server/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/odp-deferred/server/index.d.ts",
+        "default": "./dist/cjs/odp-deferred/server/index.js"
+      }
+    },
+    "./odp-deferred/facilitator": {
+      "import": {
+        "types": "./dist/esm/odp-deferred/facilitator/index.d.mts",
+        "default": "./dist/esm/odp-deferred/facilitator/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/odp-deferred/facilitator/index.d.ts",
+        "default": "./dist/cjs/odp-deferred/facilitator/index.js"
+      }
+    },
     "./exact/v1/client": {
       "import": {
         "types": "./dist/esm/exact/v1/client/index.d.mts",
