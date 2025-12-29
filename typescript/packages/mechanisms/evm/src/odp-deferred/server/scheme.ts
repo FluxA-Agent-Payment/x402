@@ -17,6 +17,7 @@ export interface OdpDeferredEvmSchemeConfig {
   startNonce?: string;
   maxAmountPerReceipt?: string;
   requestHash?: `0x${string}`;
+  minDeposit?: string;
   sessionIdFactory?: () => `0x${string}`;
 }
 
@@ -36,6 +37,7 @@ export class OdpDeferredEvmScheme implements SchemeNetworkServer {
       startNonce: config.startNonce ?? "0",
       maxAmountPerReceipt: config.maxAmountPerReceipt ?? "",
       requestHash: config.requestHash ?? ZERO_BYTES32,
+      minDeposit: config.minDeposit ?? "",
       sessionIdFactory: config.sessionIdFactory ?? createNonce,
     };
   }
@@ -82,6 +84,11 @@ export class OdpDeferredEvmScheme implements SchemeNetworkServer {
     void extensionKeys;
 
     const settlementContract = this.requireSupportedExtra(supportedKind.extra, "settlementContract");
+    const debitWallet = this.requireSupportedExtra(supportedKind.extra, "debitWallet");
+    const withdrawDelaySeconds = this.requireSupportedStringExtra(
+      supportedKind.extra,
+      "withdrawDelaySeconds",
+    );
     const authorizedProcessors = this.optionalSupportedExtraArray(
       supportedKind.extra,
       "authorizedProcessors",
@@ -102,6 +109,8 @@ export class OdpDeferredEvmScheme implements SchemeNetworkServer {
       maxSpend,
       expiry,
       settlementContract,
+      debitWallet,
+      withdrawDelaySeconds,
     };
 
     if (authorizedProcessors && authorizedProcessors.length > 0) {
@@ -114,6 +123,10 @@ export class OdpDeferredEvmScheme implements SchemeNetworkServer {
 
     if (this.config.maxAmountPerReceipt && this.config.maxAmountPerReceipt.length > 0) {
       extra.maxAmountPerReceipt = this.config.maxAmountPerReceipt;
+    }
+
+    if (this.config.minDeposit && this.config.minDeposit.length > 0) {
+      extra.minDeposit = this.config.minDeposit;
     }
 
     return {
@@ -194,6 +207,16 @@ export class OdpDeferredEvmScheme implements SchemeNetworkServer {
       throw new Error(`Missing required facilitator extra field: ${field}`);
     }
     return getAddress(extra[field] as string);
+  }
+
+  private requireSupportedStringExtra(
+    extra: Record<string, unknown> | undefined,
+    field: string,
+  ): string {
+    if (!extra || typeof extra[field] !== "string") {
+      throw new Error(`Missing required facilitator extra field: ${field}`);
+    }
+    return extra[field] as string;
   }
 
   private optionalSupportedExtraArray(

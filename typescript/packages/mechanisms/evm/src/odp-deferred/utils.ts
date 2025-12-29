@@ -7,6 +7,9 @@ export type OdpDeferredExtras = {
   maxSpend: string;
   expiry: string;
   settlementContract: `0x${string}`;
+  debitWallet: `0x${string}`;
+  withdrawDelaySeconds: string;
+  minDeposit?: string;
   authorizedProcessors?: `0x${string}`[];
   requestHash?: `0x${string}`;
   maxAmountPerReceipt?: string;
@@ -47,6 +50,9 @@ export const parseOdpDeferredExtras = (extra: Record<string, unknown>): OdpDefer
   const settlementContract = getAddress(
     requireString(extra.settlementContract, "settlementContract"),
   );
+  const debitWallet = getAddress(requireString(extra.debitWallet, "debitWallet"));
+  const withdrawDelaySeconds = requireString(extra.withdrawDelaySeconds, "withdrawDelaySeconds");
+  const minDeposit = optionalString(extra.minDeposit);
   const authorizedProcessors = optionalStringArray(extra.authorizedProcessors);
   const requestHash = optionalString(extra.requestHash) as `0x${string}` | undefined;
   const maxAmountPerReceipt = optionalString(extra.maxAmountPerReceipt);
@@ -57,6 +63,9 @@ export const parseOdpDeferredExtras = (extra: Record<string, unknown>): OdpDefer
     maxSpend,
     expiry,
     settlementContract,
+    debitWallet,
+    withdrawDelaySeconds,
+    minDeposit,
     authorizedProcessors,
     requestHash,
     maxAmountPerReceipt,

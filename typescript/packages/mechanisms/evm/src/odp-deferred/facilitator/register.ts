@@ -16,6 +16,8 @@ export function registerOdpDeferredEvmScheme(
     config.networks,
     new OdpDeferredEvmScheme(config.signer, {
       settlementContract: config.settlementContract,
+      debitWallet: config.debitWallet,
+      withdrawDelaySeconds: config.withdrawDelaySeconds,
       authorizedProcessors: config.authorizedProcessors,
       store: config.store,
     }),

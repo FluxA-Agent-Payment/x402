@@ -20,8 +20,30 @@ import {
   parseOdpDeferredExtras,
 } from "../utils";
 
+const debitWalletAbi = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "asset", type: "address" },
+    ],
+    outputs: [{ name: "balance", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "withdrawDelaySeconds",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "delay", type: "uint256" }],
+  },
+] as const;
+
 export interface OdpDeferredEvmSchemeConfig {
   settlementContract: `0x${string}`;
+  debitWallet: `0x${string}`;
+  withdrawDelaySeconds: string;
   authorizedProcessors?: `0x${string}`[];
   store?: OdpDeferredStore;
 }
@@ -35,6 +57,8 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
   constructor(private readonly signer: FacilitatorEvmSigner, config: OdpDeferredEvmSchemeConfig) {
     this.config = {
       settlementContract: getAddress(config.settlementContract),
+      debitWallet: getAddress(config.debitWallet),
+      withdrawDelaySeconds: config.withdrawDelaySeconds,
       authorizedProcessors: config.authorizedProcessors?.map(address => getAddress(address)),
       store: config.store,
     };
@@ -44,6 +68,8 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
   getExtra(_: string): Record<string, unknown> | undefined {
     return {
       settlementContract: this.config.settlementContract,
+      debitWallet: this.config.debitWallet,
+      withdrawDelaySeconds: this.config.withdrawDelaySeconds,
       authorizedProcessors: this.config.authorizedProcessors,
     };
   }
@@ -107,6 +133,20 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
       return {
         isValid: false,
         invalidReason: "settlement_contract_mismatch",
+      };
+    }
+
+    if (getAddress(extras.debitWallet) !== this.config.debitWallet) {
+      return {
+        isValid: false,
+        invalidReason: "debit_wallet_mismatch",
+      };
+    }
+
+    if (extras.withdrawDelaySeconds !== this.config.withdrawDelaySeconds) {
+      return {
+        isValid: false,
+        invalidReason: "withdraw_delay_mismatch",
       };
     }
 
@@ -225,6 +265,20 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
       };
     }
 
+    const debitWalletState = await this.getDebitWalletState(
+      extras.debitWallet,
+      approval.payer,
+      approval.asset,
+    );
+
+    if (debitWalletState.withdrawDelaySeconds !== BigInt(extras.withdrawDelaySeconds)) {
+      return {
+        isValid: false,
+        invalidReason: "debit_wallet_withdraw_delay_mismatch",
+        payer: approval.payer,
+      };
+    }
+
     if (receipt.sessionId !== approval.sessionId) {
       return {
         isValid: false,
@@ -314,6 +368,14 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
       };
     }
 
+    if (nextSpend > debitWalletState.balance) {
+      return {
+        isValid: false,
+        invalidReason: "insufficient_debit_wallet_balance",
+        payer: approval.payer,
+      };
+    }
+
     sessionRecord.spent = nextSpend;
     sessionRecord.nextNonce = sessionRecord.nextNonce + 1n;
     sessionRecord.receipts.push(receipt);
@@ -364,6 +426,24 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
       };
     }
 
+    if (getAddress(extras.debitWallet) !== this.config.debitWallet) {
+      return {
+        success: false,
+        errorReason: "debit_wallet_mismatch",
+        transaction: "",
+        network: payload.accepted.network,
+      };
+    }
+
+    if (extras.withdrawDelaySeconds !== this.config.withdrawDelaySeconds) {
+      return {
+        success: false,
+        errorReason: "withdraw_delay_mismatch",
+        transaction: "",
+        network: payload.accepted.network,
+      };
+    }
+
     const sessionRecord = this.store.getSession(receipt.sessionId);
     if (!sessionRecord) {
       return {
@@ -385,7 +465,33 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
       };
     }
 
+    const debitWalletState = await this.getDebitWalletState(
+      extras.debitWallet,
+      sessionRecord.approval.payer,
+      sessionRecord.approval.asset,
+    );
+
+    if (debitWalletState.withdrawDelaySeconds !== BigInt(extras.withdrawDelaySeconds)) {
+      return {
+        success: false,
+        errorReason: "debit_wallet_withdraw_delay_mismatch",
+        transaction: "",
+        network: payload.accepted.network,
+        payer: sessionRecord.approval.payer,
+      };
+    }
+
     const total = receipts.reduce((sum, entry) => sum + BigInt(entry.amount), 0n);
+
+    if (total > debitWalletState.balance) {
+      return {
+        success: false,
+        errorReason: "insufficient_debit_wallet_balance",
+        transaction: "",
+        network: payload.accepted.network,
+        payer: sessionRecord.approval.payer,
+      };
+    }
     const startNonce = BigInt(receipts[0].nonce);
     const endNonce = BigInt(receipts[receipts.length - 1].nonce);
 
@@ -484,6 +590,31 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
     } catch {
       return false;
     }
+  }
+
+  private async getDebitWalletState(
+    debitWallet: `0x${string}`,
+    payer: `0x${string}`,
+    asset: `0x${string}`,
+  ): Promise<{ balance: bigint; withdrawDelaySeconds: bigint }> {
+    const [balance, withdrawDelaySeconds] = await Promise.all([
+      this.signer.readContract({
+        address: debitWallet,
+        abi: debitWalletAbi,
+        functionName: "balanceOf",
+        args: [getAddress(payer), getAddress(asset)],
+      }),
+      this.signer.readContract({
+        address: debitWallet,
+        abi: debitWalletAbi,
+        functionName: "withdrawDelaySeconds",
+      }),
+    ]);
+
+    return {
+      balance: BigInt(balance as bigint),
+      withdrawDelaySeconds: BigInt(withdrawDelaySeconds as bigint),
+    };
   }
 
   private isAuthorizedProcessor(authorizedProcessors?: readonly `0x${string}`[]): boolean {

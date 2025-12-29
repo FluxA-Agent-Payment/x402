@@ -22,9 +22,22 @@ const settlementContract =
   (process.env.SETTLEMENT_CONTRACT as `0x${string}` | undefined) ||
   "0x0000000000000000000000000000000000000001";
 
+const debitWalletContract =
+  (process.env.DEBIT_WALLET_CONTRACT as `0x${string}` | undefined) ||
+  "0x0000000000000000000000000000000000000002";
+
+const withdrawDelaySeconds = process.env.WITHDRAW_DELAY_SECONDS || "86400";
+
 const authorizedProcessors = process.env.AUTHORIZED_PROCESSORS
   ? process.env.AUTHORIZED_PROCESSORS.split(",").map(value => value.trim())
   : [];
+
+const autoSettleIntervalSeconds = Number(process.env.AUTO_SETTLE_INTERVAL_SECONDS || "15");
+const autoSettleAfterSeconds = Number(process.env.AUTO_SETTLE_AFTER_SECONDS || "30");
+
+if (!process.env.DEBIT_WALLET_CONTRACT) {
+  console.warn("WARN: DEBIT_WALLET_CONTRACT not set, using placeholder address.");
+}
 
 const evmAccount = privateKeyToAccount(EVM_PRIVATE_KEY);
 
@@ -74,10 +87,22 @@ const evmSigner = toFacilitatorEvmSigner({
 
 const facilitator = new x402Facilitator();
 
+const pendingSessions = new Map<
+  string,
+  { paymentPayload: PaymentPayload; paymentRequirements: PaymentRequirements; lastReceiptAt: number }
+>();
+
+const getSessionIdFromPayload = (payload: PaymentPayload): string | undefined => {
+  const receipt = (payload.payload as { receipt?: { sessionId?: string } })?.receipt;
+  return receipt?.sessionId;
+};
+
 registerOdpDeferredEvmScheme(facilitator, {
   signer: evmSigner,
   networks: "eip155:84532",
   settlementContract,
+  debitWallet: debitWalletContract,
+  withdrawDelaySeconds,
   authorizedProcessors:
     authorizedProcessors.length > 0 ? (authorizedProcessors as `0x${string}`[]) : [evmAccount.address],
 });
@@ -102,6 +127,17 @@ app.post("/verify", async (req, res) => {
       paymentPayload,
       paymentRequirements,
     );
+
+    if (response.isValid) {
+      const sessionId = getSessionIdFromPayload(paymentPayload);
+      if (sessionId) {
+        pendingSessions.set(sessionId, {
+          paymentPayload,
+          paymentRequirements,
+          lastReceiptAt: Date.now(),
+        });
+      }
+    }
 
     res.json(response);
   } catch (error) {
@@ -130,6 +166,13 @@ app.post("/settle", async (req, res) => {
       paymentRequirements,
     );
 
+    if (response.success) {
+      const sessionId = getSessionIdFromPayload(paymentPayload);
+      if (sessionId) {
+        pendingSessions.delete(sessionId);
+      }
+    }
+
     res.json(response);
   } catch (error) {
     console.error("Settle error:", error);
@@ -149,6 +192,39 @@ app.get("/supported", (req, res) => {
     });
   }
 });
+
+const runAutoSettlement = async (): Promise<void> => {
+  if (pendingSessions.size === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  for (const [sessionId, entry] of pendingSessions) {
+    if (now - entry.lastReceiptAt < autoSettleAfterSeconds * 1000) {
+      continue;
+    }
+
+    try {
+      const response = await facilitator.settle(
+        entry.paymentPayload,
+        entry.paymentRequirements,
+      );
+
+      if (response.success) {
+        pendingSessions.delete(sessionId);
+        console.log(`Auto-settled session ${sessionId}: ${response.transaction}`);
+      }
+    } catch (error) {
+      console.error(`Auto-settle error for session ${sessionId}:`, error);
+    }
+  }
+};
+
+if (autoSettleIntervalSeconds > 0 && autoSettleAfterSeconds >= 0) {
+  setInterval(() => {
+    void runAutoSettlement();
+  }, autoSettleIntervalSeconds * 1000);
+}
 
 app.listen(parseInt(PORT, 10), () => {
   console.log(`ODP facilitator listening on http://localhost:${PORT}`);

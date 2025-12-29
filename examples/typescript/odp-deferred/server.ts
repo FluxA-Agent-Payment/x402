@@ -13,6 +13,10 @@ config();
 const PORT = process.env.PORT || "4021";
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
 const EVM_ADDRESS = process.env.EVM_ADDRESS as `0x${string}` | undefined;
+const fallbackSettleIntervalSeconds = Number(
+  process.env.FALLBACK_SETTLE_INTERVAL_SECONDS || "30",
+);
+const fallbackSettleAfterSeconds = Number(process.env.FALLBACK_SETTLE_AFTER_SECONDS || "120");
 
 if (!FACILITATOR_URL) {
   console.error("❌ FACILITATOR_URL environment variable is required");
@@ -43,9 +47,29 @@ const routeConfig: ResourceConfig = {
 
 const sessionPayments = new Map<
   string,
-  { paymentPayload: PaymentPayload; requirements: PaymentRequirements }
+  { paymentPayload: PaymentPayload; requirements: PaymentRequirements; lastReceiptAt: number }
 >();
 const requirementsBySession = new Map<string, PaymentRequirements>();
+
+const settleSession = async (sessionId: string) => {
+  const entry = sessionPayments.get(sessionId);
+
+  if (!entry) {
+    return undefined;
+  }
+
+  const settleResult = await resourceServer.settlePayment(
+    entry.paymentPayload,
+    entry.requirements,
+  );
+
+  if (settleResult.success) {
+    sessionPayments.delete(sessionId);
+    requirementsBySession.delete(sessionId);
+  }
+
+  return settleResult;
+};
 
 async function customPaymentMiddleware(
   req: Request,
@@ -131,7 +155,11 @@ async function customPaymentMiddleware(
   }
 
   if (sessionId) {
-    sessionPayments.set(sessionId, { paymentPayload, requirements: matchingRequirements });
+    sessionPayments.set(sessionId, {
+      paymentPayload,
+      requirements: matchingRequirements,
+      lastReceiptAt: Date.now(),
+    });
   }
 
   res.locals.paymentPayload = paymentPayload;
@@ -156,24 +184,15 @@ app.get("/metered", (req, res) => {
 
 app.post("/settle/:sessionId", async (req, res) => {
   const sessionId = req.params.sessionId;
-  const entry = sessionPayments.get(sessionId);
-
-  if (!entry) {
-    return res.status(404).json({
-      error: "Session not found",
-      message: "No receipts recorded for this session",
-    });
-  }
 
   try {
-    const settleResult = await resourceServer.settlePayment(
-      entry.paymentPayload,
-      entry.requirements,
-    );
+    const settleResult = await settleSession(sessionId);
 
-    if (settleResult.success) {
-      sessionPayments.delete(sessionId);
-      requirementsBySession.delete(sessionId);
+    if (!settleResult) {
+      return res.status(404).json({
+        error: "Session not found",
+        message: "No receipts recorded for this session",
+      });
     }
 
     return res.json(settleResult);
@@ -184,6 +203,38 @@ app.post("/settle/:sessionId", async (req, res) => {
     });
   }
 });
+
+const runFallbackSettlement = async (): Promise<void> => {
+  if (sessionPayments.size === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  for (const [sessionId, entry] of sessionPayments) {
+    if (fallbackSettleAfterSeconds <= 0) {
+      continue;
+    }
+
+    if (now - entry.lastReceiptAt < fallbackSettleAfterSeconds * 1000) {
+      continue;
+    }
+
+    try {
+      const settleResult = await settleSession(sessionId);
+      if (settleResult?.success) {
+        console.log(`Fallback-settled session ${sessionId}: ${settleResult.transaction}`);
+      }
+    } catch (error) {
+      console.error(`Fallback settlement error for ${sessionId}:`, error);
+    }
+  }
+};
+
+if (fallbackSettleIntervalSeconds > 0 && fallbackSettleAfterSeconds > 0) {
+  setInterval(() => {
+    void runFallbackSettlement();
+  }, fallbackSettleIntervalSeconds * 1000);
+}
 
 resourceServer.initialize().then(() => {
   app.listen(parseInt(PORT, 10), () => {

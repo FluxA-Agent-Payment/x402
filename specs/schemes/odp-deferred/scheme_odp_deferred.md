@@ -21,10 +21,21 @@ This scheme is transport-agnostic and uses the standard x402 `PaymentRequired` a
 ## Protocol Flow (Overview)
 
 1. Server responds with `PaymentRequired` that includes `scheme=odp-deferred` and session parameters.
-2. Client retries with `PaymentPayload` containing a Receipt and, when opening a session, a SessionApproval.
-3. Server or facilitator verifies signatures and session state, records the Receipt, and returns the protected resource.
-4. A settlement processor batches receipts and submits a settlement transaction later.
-5. The on-chain contract verifies the batch, updates session state, and executes transfers.
+2. Client locks funds in a debit wallet contract before opening a session.
+3. Client retries with `PaymentPayload` containing a Receipt and, when opening a session, a SessionApproval.
+4. Server or facilitator verifies signatures, debit wallet funding, and session state, records the Receipt, and returns the protected resource.
+5. A settlement processor batches receipts and submits a settlement transaction later.
+6. The on-chain contract verifies the batch, updates session state, and executes transfers.
+
+## Debit Wallet Funding and Withdrawal
+
+ODP deferred requires the payer to lock funds in an on-chain debit wallet contract before using a session. The debit wallet contract enforces a withdrawal delay (for example, 24 hours) so funds remain available while settlement is deferred. Facilitators MUST query the debit wallet on-chain state during verification and settlement and SHOULD reject payments when the locked balance is insufficient.
+
+The debit wallet contract interface is chain-specific; see the EVM scheme document for required functions and semantics.
+
+## Settlement Scheduling
+
+Facilitators SHOULD batch-settle receipts on a schedule of their choosing. Clients do not need to explicitly trigger settlement. Resource servers MAY call the facilitator `/settle` endpoint when a session is overdue or operationally necessary (for example, if settlement has not occurred within a desired window).
 
 ## Settlement Response Semantics
 
@@ -35,6 +46,7 @@ ODP allows settlement to occur after the resource response. Implementations MAY 
 - Receipts MUST be sequential per session (nonce monotonic, no reuse).
 - Receipt amount MUST match the per-request `PaymentRequirements.amount`.
 - Total receipts MUST NOT exceed the session `maxSpend` and MUST be within `expiry`.
+- The debit wallet locked balance MUST be sufficient to cover cumulative session spend.
 - Asset and payee MUST match the SessionApproval and `PaymentRequirements`.
 - Settlement processors MUST be authorized when a processor allowlist is configured.
 - Batch settlement MUST enforce a contiguous nonce range and update `nextNonce` atomically.
