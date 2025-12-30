@@ -1,0 +1,3 @@
+[submodule "examples/typescript/odp-deferred/onchain/lib/forge-std"]
+	path = examples/typescript/odp-deferred/onchain/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std

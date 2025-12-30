@@ -7,8 +7,11 @@ import {
 } from "@x402/core/server";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { OdpDeferredEvmScheme } from "@x402/evm/odp-deferred/server";
+import { createLogger } from "./logger";
 
 config();
+
+const logger = createLogger({ component: "server" });
 
 const PORT = process.env.PORT || "4021";
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
@@ -19,12 +22,12 @@ const fallbackSettleIntervalSeconds = Number(
 const fallbackSettleAfterSeconds = Number(process.env.FALLBACK_SETTLE_AFTER_SECONDS || "120");
 
 if (!FACILITATOR_URL) {
-  console.error("❌ FACILITATOR_URL environment variable is required");
+  logger.error("FACILITATOR_URL environment variable is required");
   process.exit(1);
 }
 
 if (!EVM_ADDRESS) {
-  console.error("❌ EVM_ADDRESS environment variable is required");
+  logger.error("EVM_ADDRESS environment variable is required");
   process.exit(1);
 }
 
@@ -36,6 +39,14 @@ const resourceServer = new x402ResourceServer(facilitatorClient).register(
     expirySeconds: 900,
   }),
 );
+
+logger.info("ODP resource server config", {
+  port: PORT,
+  facilitatorUrl: FACILITATOR_URL,
+  payTo: EVM_ADDRESS,
+  fallbackSettleIntervalSeconds,
+  fallbackSettleAfterSeconds,
+});
 
 const routeConfig: ResourceConfig = {
   scheme: "odp-deferred",
@@ -118,6 +129,7 @@ async function customPaymentMiddleware(
       error: "Payment Required",
       message: "Provide a PAYMENT-SIGNATURE to access this endpoint",
     });
+    logger.info("Issued payment requirements", { sessionId, route: req.path });
     return;
   }
 
@@ -141,6 +153,7 @@ async function customPaymentMiddleware(
       error: "Payment Requirements Mismatch",
       message: "No matching payment requirements found",
     });
+    logger.warn("Payment requirements missing", { sessionId });
     return;
   }
 
@@ -151,6 +164,10 @@ async function customPaymentMiddleware(
       error: "Invalid Payment",
       message: verifyResult.invalidReason || "Verification failed",
     });
+    logger.warn("Payment verification failed", {
+      sessionId,
+      invalidReason: verifyResult.invalidReason,
+    });
     return;
   }
 
@@ -160,6 +177,7 @@ async function customPaymentMiddleware(
       requirements: matchingRequirements,
       lastReceiptAt: Date.now(),
     });
+    logger.debug("Receipt accepted", { sessionId, payer: verifyResult.payer });
   }
 
   res.locals.paymentPayload = paymentPayload;
@@ -195,8 +213,21 @@ app.post("/settle/:sessionId", async (req, res) => {
       });
     }
 
+    if (settleResult.success) {
+      logger.info("Manual settlement succeeded", {
+        sessionId,
+        transaction: settleResult.transaction,
+      });
+    } else {
+      logger.warn("Manual settlement failed", {
+        sessionId,
+        errorReason: settleResult.errorReason,
+      });
+    }
+
     return res.json(settleResult);
   } catch (error) {
+    logger.error("Manual settlement error", { sessionId, error });
     return res.status(500).json({
       error: "Settlement failed",
       message: error instanceof Error ? error.message : "Unknown error",
@@ -222,10 +253,13 @@ const runFallbackSettlement = async (): Promise<void> => {
     try {
       const settleResult = await settleSession(sessionId);
       if (settleResult?.success) {
-        console.log(`Fallback-settled session ${sessionId}: ${settleResult.transaction}`);
+        logger.info("Fallback-settled session", {
+          sessionId,
+          transaction: settleResult.transaction,
+        });
       }
     } catch (error) {
-      console.error(`Fallback settlement error for ${sessionId}:`, error);
+      logger.error("Fallback settlement error", { sessionId, error });
     }
   }
 };
@@ -238,6 +272,8 @@ if (fallbackSettleIntervalSeconds > 0 && fallbackSettleAfterSeconds > 0) {
 
 resourceServer.initialize().then(() => {
   app.listen(parseInt(PORT, 10), () => {
-    console.log(`ODP resource server listening on http://localhost:${PORT}`);
+    logger.info("ODP resource server listening", {
+      url: `http://localhost:${PORT}`,
+    });
   });
 });

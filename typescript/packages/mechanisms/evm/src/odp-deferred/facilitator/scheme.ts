@@ -40,12 +40,57 @@ const debitWalletAbi = [
   },
 ] as const;
 
+const settlementWalletAbi = [
+  {
+    type: "function",
+    name: "settleSession",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "approval",
+        type: "tuple",
+        components: [
+          { name: "payer", type: "address" },
+          { name: "payee", type: "address" },
+          { name: "asset", type: "address" },
+          { name: "maxSpend", type: "uint256" },
+          { name: "expiry", type: "uint256" },
+          { name: "sessionId", type: "bytes32" },
+          { name: "startNonce", type: "uint256" },
+          { name: "authorizedProcessorsHash", type: "bytes32" },
+        ],
+      },
+      { name: "sessionSignature", type: "bytes" },
+      { name: "startNonce", type: "uint256" },
+      { name: "endNonce", type: "uint256" },
+      { name: "totalAmount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+type OdpDeferredLogger = {
+  debug(message: string, fields?: Record<string, unknown>): void;
+  info(message: string, fields?: Record<string, unknown>): void;
+  warn(message: string, fields?: Record<string, unknown>): void;
+  error(message: string, fields?: Record<string, unknown>): void;
+};
+
+const noopLogger: OdpDeferredLogger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
+
 export interface OdpDeferredEvmSchemeConfig {
   settlementContract: `0x${string}`;
   debitWallet: `0x${string}`;
   withdrawDelaySeconds: string;
+  settlementMode?: "synthetic" | "onchain";
   authorizedProcessors?: `0x${string}`[];
   store?: OdpDeferredStore;
+  logger?: OdpDeferredLogger;
 }
 
 export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
@@ -53,16 +98,19 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
   readonly caipFamily = "eip155:*";
   private readonly config: OdpDeferredEvmSchemeConfig;
   private readonly store: OdpDeferredStore;
+  private readonly logger: OdpDeferredLogger;
 
   constructor(private readonly signer: FacilitatorEvmSigner, config: OdpDeferredEvmSchemeConfig) {
     this.config = {
       settlementContract: getAddress(config.settlementContract),
       debitWallet: getAddress(config.debitWallet),
       withdrawDelaySeconds: config.withdrawDelaySeconds,
+      settlementMode: config.settlementMode ?? "synthetic",
       authorizedProcessors: config.authorizedProcessors?.map(address => getAddress(address)),
       store: config.store,
     };
     this.store = config.store ?? new InMemoryOdpDeferredStore();
+    this.logger = config.logger ?? noopLogger;
   }
 
   getExtra(_: string): Record<string, unknown> | undefined {
@@ -166,6 +214,7 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
       }
 
       const sessionApproval = odpPayload.sessionApproval as OdpDeferredSessionApproval;
+      const sessionSignature = odpPayload.sessionSignature;
       const expectedHash = hashAuthorizedProcessors(extras.authorizedProcessors);
 
       if (sessionApproval.authorizedProcessorsHash !== expectedHash) {
@@ -208,6 +257,7 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
       if (!sessionRecord) {
         sessionRecord = {
           approval: sessionApproval,
+          sessionSignature,
           settlementContract: extras.settlementContract,
           nextNonce: BigInt(sessionApproval.startNonce),
           spent: 0n,
@@ -226,6 +276,10 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
           isValid: false,
           invalidReason: "session_approval_mismatch",
         };
+      }
+
+      if (sessionSignature) {
+        sessionRecord.sessionSignature = sessionSignature;
       }
     }
 
@@ -492,6 +546,7 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
         payer: sessionRecord.approval.payer,
       };
     }
+
     const startNonce = BigInt(receipts[0].nonce);
     const endNonce = BigInt(receipts[receipts.length - 1].nonce);
 
@@ -501,6 +556,90 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
         return {
           success: false,
           errorReason: "receipt_nonce_gap",
+          transaction: "",
+          network: payload.accepted.network,
+          payer: sessionRecord.approval.payer,
+        };
+      }
+    }
+
+    if (this.config.settlementMode === "onchain") {
+      if (!sessionRecord.sessionSignature) {
+        return {
+          success: false,
+          errorReason: "missing_session_signature",
+          transaction: "",
+          network: payload.accepted.network,
+          payer: sessionRecord.approval.payer,
+        };
+      }
+
+      const approvalArgs = {
+        payer: sessionRecord.approval.payer,
+        payee: sessionRecord.approval.payee,
+        asset: sessionRecord.approval.asset,
+        maxSpend: BigInt(sessionRecord.approval.maxSpend),
+        expiry: BigInt(sessionRecord.approval.expiry),
+        sessionId: sessionRecord.approval.sessionId,
+        startNonce: BigInt(sessionRecord.approval.startNonce),
+        authorizedProcessorsHash: sessionRecord.approval.authorizedProcessorsHash,
+      };
+
+      try {
+        this.logger.info("Submitting on-chain settlement", {
+          sessionId: sessionRecord.approval.sessionId,
+          payer: sessionRecord.approval.payer,
+          startNonce: startNonce.toString(),
+          endNonce: endNonce.toString(),
+          total: total.toString(),
+        });
+
+        const txHash = await this.signer.writeContract({
+          address: this.config.settlementContract,
+          abi: settlementWalletAbi,
+          functionName: "settleSession",
+          args: [approvalArgs, sessionRecord.sessionSignature, startNonce, endNonce, total],
+        });
+
+        this.logger.info("On-chain settlement submitted", {
+          sessionId: sessionRecord.approval.sessionId,
+          txHash,
+        });
+
+        const receiptResult = await this.signer.waitForTransactionReceipt({ hash: txHash });
+        this.logger.info("On-chain settlement receipt", {
+          sessionId: sessionRecord.approval.sessionId,
+          txHash,
+          status: receiptResult.status,
+        });
+
+        if (receiptResult.status !== "success") {
+          return {
+            success: false,
+            errorReason: "settlement_transaction_failed",
+            transaction: txHash,
+            network: payload.accepted.network,
+            payer: sessionRecord.approval.payer,
+          };
+        }
+
+        sessionRecord.receipts = [];
+        this.store.setSession(receipt.sessionId, sessionRecord);
+
+        return {
+          success: true,
+          transaction: txHash,
+          network: payload.accepted.network,
+          payer: sessionRecord.approval.payer,
+        };
+      } catch (error) {
+        this.logger.error("On-chain settlement error", {
+          sessionId: sessionRecord.approval.sessionId,
+          error,
+        });
+        return {
+          success: false,
+          errorReason: error instanceof Error ? error.message : "settlement_transaction_failed",
           transaction: "",
           network: payload.accepted.network,
           payer: sessionRecord.approval.payer,

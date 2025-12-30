@@ -10,3 +10,7 @@ __pycache__/
 e2e/facilitators/external-proxies/*
 !e2e/facilitators/external-proxies/README.md
 typescript/package-lock.json
+examples/typescript/odp-deferred/onchain/out/
+examples/typescript/odp-deferred/onchain/cache/
+examples/typescript/odp-deferred/onchain/lib/
+examples/typescript/odp-deferred/onchain/broadcast/

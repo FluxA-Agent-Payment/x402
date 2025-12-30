@@ -7,14 +7,18 @@ import { x402Facilitator } from "@x402/core/facilitator";
 import { PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/core/types";
 import { toFacilitatorEvmSigner } from "@x402/evm";
 import { registerOdpDeferredEvmScheme } from "@x402/evm/odp-deferred/facilitator";
+import { createLogger } from "./logger";
 
 config();
+
+const logger = createLogger({ component: "facilitator" });
+const schemeLogger = logger.child({ scope: "odp-deferred" });
 
 const PORT = process.env.PORT || "4022";
 const EVM_PRIVATE_KEY = process.env.EVM_PRIVATE_KEY as `0x${string}` | undefined;
 
 if (!EVM_PRIVATE_KEY) {
-  console.error("❌ EVM_PRIVATE_KEY environment variable is required");
+  logger.error("EVM_PRIVATE_KEY environment variable is required");
   process.exit(1);
 }
 
@@ -34,9 +38,13 @@ const authorizedProcessors = process.env.AUTHORIZED_PROCESSORS
 
 const autoSettleIntervalSeconds = Number(process.env.AUTO_SETTLE_INTERVAL_SECONDS || "15");
 const autoSettleAfterSeconds = Number(process.env.AUTO_SETTLE_AFTER_SECONDS || "30");
+const settlementMode =
+  process.env.SETTLEMENT_MODE && process.env.SETTLEMENT_MODE.toLowerCase() === "onchain"
+    ? "onchain"
+    : "synthetic";
 
 if (!process.env.DEBIT_WALLET_CONTRACT) {
-  console.warn("WARN: DEBIT_WALLET_CONTRACT not set, using placeholder address.");
+  logger.warn("DEBIT_WALLET_CONTRACT not set, using placeholder address.");
 }
 
 const evmAccount = privateKeyToAccount(EVM_PRIVATE_KEY);
@@ -97,12 +105,24 @@ const getSessionIdFromPayload = (payload: PaymentPayload): string | undefined =>
   return receipt?.sessionId;
 };
 
+logger.info("ODP facilitator config", {
+  port: PORT,
+  settlementContract,
+  debitWalletContract,
+  withdrawDelaySeconds,
+  settlementMode,
+  autoSettleIntervalSeconds,
+  autoSettleAfterSeconds,
+});
+
 registerOdpDeferredEvmScheme(facilitator, {
   signer: evmSigner,
   networks: "eip155:84532",
   settlementContract,
   debitWallet: debitWalletContract,
   withdrawDelaySeconds,
+  settlementMode,
+  logger: schemeLogger,
   authorizedProcessors:
     authorizedProcessors.length > 0 ? (authorizedProcessors as `0x${string}`[]) : [evmAccount.address],
 });
@@ -136,12 +156,18 @@ app.post("/verify", async (req, res) => {
           paymentRequirements,
           lastReceiptAt: Date.now(),
         });
+        logger.debug("Receipt verified", { sessionId, payer: response.payer });
       }
+    } else {
+      logger.warn("Receipt verification failed", {
+        invalidReason: response.invalidReason,
+        sessionId: getSessionIdFromPayload(paymentPayload),
+      });
     }
 
     res.json(response);
   } catch (error) {
-    console.error("Verify error:", error);
+    logger.error("Verify error", { error });
     res.status(500).json({
       error: error instanceof Error ? error.message : "Unknown error",
     });
@@ -171,11 +197,22 @@ app.post("/settle", async (req, res) => {
       if (sessionId) {
         pendingSessions.delete(sessionId);
       }
+      logger.info("Settlement succeeded", {
+        sessionId,
+        transaction: response.transaction,
+        mode: settlementMode,
+      });
+    } else {
+      logger.warn("Settlement failed", {
+        errorReason: response.errorReason,
+        sessionId: getSessionIdFromPayload(paymentPayload),
+        mode: settlementMode,
+      });
     }
 
     res.json(response);
   } catch (error) {
-    console.error("Settle error:", error);
+    logger.error("Settle error", { error });
     res.status(500).json({
       error: error instanceof Error ? error.message : "Unknown error",
     });
@@ -186,7 +223,7 @@ app.get("/supported", (req, res) => {
   try {
     res.json(facilitator.getSupported());
   } catch (error) {
-    console.error("Supported error:", error);
+    logger.error("Supported error", { error });
     res.status(500).json({
       error: error instanceof Error ? error.message : "Unknown error",
     });
@@ -212,10 +249,20 @@ const runAutoSettlement = async (): Promise<void> => {
 
       if (response.success) {
         pendingSessions.delete(sessionId);
-        console.log(`Auto-settled session ${sessionId}: ${response.transaction}`);
+        logger.info("Auto-settled session", {
+          sessionId,
+          transaction: response.transaction,
+          mode: settlementMode,
+        });
+      } else {
+        logger.warn("Auto-settlement failed", {
+          sessionId,
+          errorReason: response.errorReason,
+          mode: settlementMode,
+        });
       }
     } catch (error) {
-      console.error(`Auto-settle error for session ${sessionId}:`, error);
+      logger.error("Auto-settle error", { sessionId, error });
     }
   }
 };
@@ -227,5 +274,13 @@ if (autoSettleIntervalSeconds > 0 && autoSettleAfterSeconds >= 0) {
 }
 
 app.listen(parseInt(PORT, 10), () => {
-  console.log(`ODP facilitator listening on http://localhost:${PORT}`);
+  logger.info("ODP facilitator listening", {
+    url: `http://localhost:${PORT}`,
+    settlementContract,
+    debitWalletContract,
+    withdrawDelaySeconds,
+    settlementMode,
+    autoSettleIntervalSeconds,
+    autoSettleAfterSeconds,
+  });
 });

@@ -18,8 +18,10 @@ export function registerOdpDeferredEvmScheme(
       settlementContract: config.settlementContract,
       debitWallet: config.debitWallet,
       withdrawDelaySeconds: config.withdrawDelaySeconds,
+      settlementMode: config.settlementMode,
       authorizedProcessors: config.authorizedProcessors,
       store: config.store,
+      logger: config.logger,
     }),
   );
 

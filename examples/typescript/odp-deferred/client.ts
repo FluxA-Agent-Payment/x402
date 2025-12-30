@@ -4,16 +4,20 @@ import { registerOdpDeferredEvmScheme } from "@x402/evm/odp-deferred/client";
 import { createWalletClient, http, publicActions } from "viem";
 import { baseSepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
+import { createLogger } from "./logger";
 
 config();
+
+const logger = createLogger({ component: "client" });
 
 const evmPrivateKey = process.env.EVM_PRIVATE_KEY as `0x${string}`;
 const BASE_URL = process.env.RESOURCE_SERVER_URL || "http://localhost:4021";
 const EVM_RPC_URL = process.env.EVM_RPC_URL;
 const AUTO_DEPOSIT = (process.env.AUTO_DEPOSIT || "true").toLowerCase() !== "false";
+const SKIP_MANUAL_SETTLE = (process.env.SKIP_MANUAL_SETTLE || "false").toLowerCase() === "true";
 
 if (!evmPrivateKey) {
-  console.error("❌ EVM_PRIVATE_KEY environment variable is required");
+  logger.error("EVM_PRIVATE_KEY environment variable is required");
   process.exit(1);
 }
 
@@ -91,6 +95,12 @@ async function main(): Promise<void> {
   const client = new x402Client();
   registerOdpDeferredEvmScheme(client, { signer: account });
 
+  logger.info("ODP client config", {
+    baseUrl: BASE_URL,
+    autoDeposit: AUTO_DEPOSIT,
+    skipManualSettle: SKIP_MANUAL_SETTLE,
+  });
+
   const initial = await fetch(url);
   if (initial.status !== 402) {
     throw new Error(`Expected 402, got ${initial.status}`);
@@ -117,7 +127,7 @@ async function main(): Promise<void> {
 
   if (AUTO_DEPOSIT) {
     if (!EVM_RPC_URL) {
-      console.warn("WARN: EVM_RPC_URL not set, skipping auto-deposit.");
+      logger.warn("EVM_RPC_URL not set, skipping auto-deposit.");
     } else {
       const walletClient = createWalletClient({
         account,
@@ -155,6 +165,11 @@ async function main(): Promise<void> {
             args: [debitWallet, requiredDeposit],
           });
           await walletClient.waitForTransactionReceipt({ hash: approveHash });
+          logger.info("Approved debit wallet", {
+            debitWallet,
+            amount: requiredDeposit.toString(),
+            txHash: approveHash,
+          });
         }
 
         const depositHash = await walletClient.writeContract({
@@ -164,12 +179,19 @@ async function main(): Promise<void> {
           args: [requirement.asset, topUp],
         });
         await walletClient.waitForTransactionReceipt({ hash: depositHash });
+        logger.info("Deposited to debit wallet", {
+          debitWallet,
+          amount: topUp.toString(),
+          txHash: depositHash,
+        });
       } else {
-        console.log("Debit wallet already funded.");
+        logger.info("Debit wallet already funded", {
+          balance: currentBalance.toString(),
+        });
       }
     }
   } else {
-    console.log("Auto-deposit disabled; ensure the debit wallet is funded before continuing.");
+    logger.info("Auto-deposit disabled; ensure the debit wallet is funded before continuing.");
   }
 
   let sessionId: string | undefined;
@@ -179,6 +201,7 @@ async function main(): Promise<void> {
     const paymentHeader = encodeHeader(paymentPayload);
 
     sessionId = (paymentPayload.payload as { receipt?: { sessionId?: string } })?.receipt?.sessionId;
+    logger.debug("Sending paid request", { sessionId });
 
     const response = await fetch(url, {
       headers: {
@@ -187,11 +210,16 @@ async function main(): Promise<void> {
     });
 
     const body = await response.json();
-    console.log(`Response ${i + 1}:`, body);
+    logger.info("Received response", { index: i + 1, sessionId });
   }
 
   if (!sessionId) {
     throw new Error("Session ID missing from payload");
+  }
+
+  if (SKIP_MANUAL_SETTLE) {
+    logger.info("Skipping manual settlement; waiting for facilitator auto-settle.");
+    return;
   }
 
   const settleResponse = await fetch(`${BASE_URL}/settle/${sessionId}`, {
@@ -199,10 +227,10 @@ async function main(): Promise<void> {
   });
   const settleBody = await settleResponse.json();
 
-  console.log("Settlement response:", settleBody);
+  logger.info("Settlement response", settleBody as Record<string, unknown>);
 }
 
 main().catch(error => {
-  console.error(error);
+  logger.error("Client error", { error });
   process.exit(1);
 });

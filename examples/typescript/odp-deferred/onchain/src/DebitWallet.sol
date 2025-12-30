@@ -7,7 +7,7 @@ interface IERC20 {
 }
 
 /// @notice Reference debit wallet implementation for ODP deferred payments.
-/// @dev This contract is for specification reference only and is not audited.
+/// @dev This contract is for example usage only and is not audited.
 contract DebitWallet {
     struct WithdrawRequest {
         uint256 amount;
@@ -24,6 +24,7 @@ contract DebitWallet {
     event Deposited(address indexed owner, address indexed asset, uint256 amount);
     event WithdrawRequested(address indexed owner, address indexed asset, uint256 amount, uint256 requestedAt);
     event Withdrawn(address indexed owner, address indexed asset, uint256 amount);
+    event SettlementContractUpdated(address indexed settlementContract);
 
     constructor(uint256 withdrawDelaySeconds_) {
         withdrawDelaySeconds = withdrawDelaySeconds_;
@@ -42,6 +43,7 @@ contract DebitWallet {
 
     function setSettlementContract(address settlementContract_) external onlyOwner {
         settlementContract = settlementContract_;
+        emit SettlementContractUpdated(settlementContract_);
     }
 
     function deposit(address asset, uint256 amount) external {
@@ -80,16 +82,16 @@ contract DebitWallet {
         require(IERC20(asset).transfer(payee, amount), "transfer_failed");
     }
 
-    function balanceOf(address owner, address asset) external view returns (uint256) {
-        return balances[owner][asset];
+    function balanceOf(address owner_, address asset) external view returns (uint256) {
+        return balances[owner_][asset];
     }
 
-    function withdrawRequest(address owner, address asset)
+    function withdrawRequest(address owner_, address asset)
         external
         view
         returns (uint256 amount, uint256 requestedAt)
     {
-        WithdrawRequest memory request = withdrawRequests[owner][asset];
+        WithdrawRequest memory request = withdrawRequests[owner_][asset];
         return (request.amount, request.requestedAt);
     }
 }

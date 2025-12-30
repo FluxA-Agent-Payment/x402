@@ -12,5 +12,5 @@
     "outDir": "./dist",
     "types": ["node"]
   },
-  "include": ["client.ts", "server.ts", "facilitator.ts"]
+  "include": ["client.ts", "server.ts", "facilitator.ts", "logger.ts"]
 }

@@ -2,6 +2,7 @@ import { OdpDeferredReceipt, OdpDeferredSessionApproval } from "../types";
 
 export type OdpDeferredSessionRecord = {
   approval: OdpDeferredSessionApproval;
+  sessionSignature?: `0x${string}`;
   settlementContract: `0x${string}`;
   nextNonce: bigint;
   spent: bigint;

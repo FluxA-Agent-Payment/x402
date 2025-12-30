@@ -72,6 +72,8 @@ function withdrawRequest(address owner, address asset)
   external
   view
   returns (uint256 amount, uint256 requestedAt);
+function settleFrom(address payer, address asset, address payee, uint256 amount) external;
+function setSettlementContract(address settlement) external;
 ```
 
 Semantics:
@@ -80,6 +82,8 @@ Semantics:
 - `requestWithdraw` starts the withdrawal delay timer.
 - `withdraw` MUST revert unless `block.timestamp >= requestedAt + withdrawDelaySeconds()`.
 - `balanceOf` returns the currently locked balance for a payer and asset.
+- `settleFrom` transfers locked funds to a payee and MUST only be callable by the configured settlement contract.
+- `setSettlementContract` configures the authorized settlement contract address.
 
 Facilitators MUST query `balanceOf` and `withdrawDelaySeconds` on-chain during verification and settlement.
 Reference implementation (not audited): `specs/contracts/debit-wallet/DebitWallet.sol`.
@@ -192,7 +196,7 @@ Upon successful verification, the verifier MUST increment `nextNonce` and record
 
 ## Settlement
 
-Settlement is performed by submitting a batch to the `settlementContract`. The on-chain contract MUST enforce all of the following:
+Settlement is performed by submitting a batch to the `settlementContract`. In a debit-wallet model, the settlement contract typically calls `debitWallet.settleFrom` to transfer locked funds to the payee and enforces an allowlist of processors. The on-chain contract MUST enforce all of the following:
 
 - Session state exists or is created from a valid SessionApproval signature.
 - Session is not expired.
