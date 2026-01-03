@@ -15,10 +15,12 @@ const logger = createLogger({ component: "facilitator" });
 const schemeLogger = logger.child({ scope: "odp-deferred" });
 
 const PORT = process.env.PORT || "4022";
-const EVM_PRIVATE_KEY = process.env.EVM_PRIVATE_KEY as `0x${string}` | undefined;
+const FACILITATOR_PRIVATE_KEY = process.env.FACILITATOR_PRIVATE_KEY as
+  | `0x${string}`
+  | undefined;
 
-if (!EVM_PRIVATE_KEY) {
-  logger.error("EVM_PRIVATE_KEY environment variable is required");
+if (!FACILITATOR_PRIVATE_KEY) {
+  logger.error("FACILITATOR_PRIVATE_KEY environment variable is required");
   process.exit(1);
 }
 
@@ -47,16 +49,16 @@ if (!process.env.DEBIT_WALLET_CONTRACT) {
   logger.warn("DEBIT_WALLET_CONTRACT not set, using placeholder address.");
 }
 
-const evmAccount = privateKeyToAccount(EVM_PRIVATE_KEY);
+const facilitatorAccount = privateKeyToAccount(FACILITATOR_PRIVATE_KEY);
 
 const viemClient = createWalletClient({
-  account: evmAccount,
+  account: facilitatorAccount,
   chain: baseSepolia,
   transport: http(),
 }).extend(publicActions);
 
-const evmSigner = toFacilitatorEvmSigner({
-  address: evmAccount.address,
+const facilitatorSigner = toFacilitatorEvmSigner({
+  address: facilitatorAccount.address,
   readContract: (args: {
     address: `0x${string}`;
     abi: readonly unknown[];
@@ -116,7 +118,7 @@ logger.info("ODP facilitator config", {
 });
 
 registerOdpDeferredEvmScheme(facilitator, {
-  signer: evmSigner,
+  signer: facilitatorSigner,
   networks: "eip155:84532",
   settlementContract,
   debitWallet: debitWalletContract,
@@ -124,7 +126,9 @@ registerOdpDeferredEvmScheme(facilitator, {
   settlementMode,
   logger: schemeLogger,
   authorizedProcessors:
-    authorizedProcessors.length > 0 ? (authorizedProcessors as `0x${string}`[]) : [evmAccount.address],
+    authorizedProcessors.length > 0
+      ? (authorizedProcessors as `0x${string}`[])
+      : [facilitatorAccount.address],
 });
 
 const app = express();

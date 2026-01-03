@@ -8,9 +8,9 @@ import { toFacilitatorEvmSigner } from "@x402/evm";
 import { registerOdpDeferredEvmScheme } from "@x402/evm/odp-deferred/facilitator";
 config();
 const PORT = process.env.PORT || "4022";
-const EVM_PRIVATE_KEY = process.env.EVM_PRIVATE_KEY;
-if (!EVM_PRIVATE_KEY) {
-    console.error("❌ EVM_PRIVATE_KEY environment variable is required");
+const FACILITATOR_PRIVATE_KEY = process.env.FACILITATOR_PRIVATE_KEY;
+if (!FACILITATOR_PRIVATE_KEY) {
+    console.error("❌ FACILITATOR_PRIVATE_KEY environment variable is required");
     process.exit(1);
 }
 const settlementContract = process.env.SETTLEMENT_CONTRACT ||
@@ -18,14 +18,14 @@ const settlementContract = process.env.SETTLEMENT_CONTRACT ||
 const authorizedProcessors = process.env.AUTHORIZED_PROCESSORS
     ? process.env.AUTHORIZED_PROCESSORS.split(",").map(value => value.trim())
     : [];
-const evmAccount = privateKeyToAccount(EVM_PRIVATE_KEY);
+const facilitatorAccount = privateKeyToAccount(FACILITATOR_PRIVATE_KEY);
 const viemClient = createWalletClient({
-    account: evmAccount,
+    account: facilitatorAccount,
     chain: baseSepolia,
     transport: http(),
 }).extend(publicActions);
-const evmSigner = toFacilitatorEvmSigner({
-    address: evmAccount.address,
+const facilitatorSigner = toFacilitatorEvmSigner({
+    address: facilitatorAccount.address,
     readContract: (args) => viemClient.readContract({
         ...args,
         args: args.args || [],
@@ -41,10 +41,10 @@ const evmSigner = toFacilitatorEvmSigner({
 });
 const facilitator = new x402Facilitator();
 registerOdpDeferredEvmScheme(facilitator, {
-    signer: evmSigner,
+    signer: facilitatorSigner,
     networks: "eip155:84532",
     settlementContract,
-    authorizedProcessors: authorizedProcessors.length > 0 ? authorizedProcessors : [evmAccount.address],
+    authorizedProcessors: authorizedProcessors.length > 0 ? authorizedProcessors : [facilitatorAccount.address],
 });
 const app = express();
 app.use(express.json());

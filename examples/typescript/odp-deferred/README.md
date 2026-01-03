@@ -1,8 +1,11 @@
 # ODP Deferred Scheme Example
 
-This example demonstrates the `odp-deferred` scheme with deferred settlement on EVM, including debit wallet funding and facilitator-side batch settlement.
+This example demonstrates the `odp-deferred` scheme with deferred settlement on EVM, including debit wallet
+funding and facilitator-side batch settlement.
 
-## Setup
+## Playbook (Step-by-Step)
+
+1) Install dependencies and build the workspace packages:
 
 ```bash
 cd ../
@@ -10,69 +13,137 @@ pnpm install && pnpm build
 cd odp-deferred
 ```
 
-## Environment Variables
+2) Create your environment file:
 
-Create a `.env` file (or export env vars) with:
-
-```
-EVM_PRIVATE_KEY=0x...
-EVM_ADDRESS=0x...
-FACILITATOR_URL=http://localhost:4022
-RESOURCE_SERVER_URL=http://localhost:4021
-SETTLEMENT_CONTRACT=0x0000000000000000000000000000000000000001
-DEBIT_WALLET_CONTRACT=0x0000000000000000000000000000000000000002
-WITHDRAW_DELAY_SECONDS=86400
-AUTHORIZED_PROCESSORS=0x...,0x...
-AUTO_SETTLE_INTERVAL_SECONDS=15
-AUTO_SETTLE_AFTER_SECONDS=30
-FALLBACK_SETTLE_INTERVAL_SECONDS=30
-FALLBACK_SETTLE_AFTER_SECONDS=120
-AUTO_DEPOSIT=true
-EVM_RPC_URL=https://base-sepolia.g.alchemy.com/v2/...
+```bash
+cp .env.example .env
 ```
 
-Notes:
+Fill in the values in `.env` using the explanations in the next section. Make sure the key you use has
+testnet ETH for gas and the target ERC-20 (Base Sepolia USDC if running the on-chain flow). Use a
+different key for the facilitator and the client.
 
-- `AUTHORIZED_PROCESSORS` is optional; if omitted, the facilitator address is used.
-- `SETTLEMENT_CONTRACT` is a placeholder for demo purposes.
-- `DEBIT_WALLET_CONTRACT` must be a deployed debit wallet contract implementing the interface in the spec.
-- `WITHDRAW_DELAY_SECONDS` should match the on-chain contract value.
-- `AUTO_DEPOSIT` requires `EVM_RPC_URL` and will approve/deposit ERC-20 funds if the balance is insufficient.
-- `SETTLEMENT_MODE=onchain` executes real settlement transactions on-chain using the settlement wallet.
+3) (Optional, on-chain only) Deploy the debit wallet + settlement wallet contracts.
 
-## Run
+See "On-chain Base Sepolia Runbook" below for the Foundry flow.
 
-Terminal 1 (facilitator):
+4) Start the facilitator (skip if you are using an external facilitator):
 
 ```bash
 pnpm start:facilitator
 ```
 
-Terminal 2 (server):
+5) Start the resource server:
 
 ```bash
 pnpm start:server
 ```
 
-Terminal 3 (client):
+6) Run the client:
 
 ```bash
 pnpm start:client
 ```
 
-The client sends three paid requests that are verified but not settled. It then calls the
-`/settle/:sessionId` endpoint to trigger batch settlement.
+7) Verify settlement behavior:
 
-The facilitator also runs a background scheduler that batch-settles sessions once they have been idle
-for `AUTO_SETTLE_AFTER_SECONDS`. The server fallback scheduler can call `/settle` when a session has
-not been settled within `FALLBACK_SETTLE_AFTER_SECONDS`.
+- Manual settlement: the client calls `POST /settle/:sessionId` and the logs show "Settlement succeeded".
+- Auto settlement: set `SKIP_MANUAL_SETTLE=true`, disable fallback (`FALLBACK_SETTLE_INTERVAL_SECONDS=0`,
+  `FALLBACK_SETTLE_AFTER_SECONDS=0`), and wait for "Auto-settled session" in the facilitator logs.
 
-If you want to rely solely on facilitator auto-settlement, set `SKIP_MANUAL_SETTLE=true` for the client
-and disable server fallback (`FALLBACK_SETTLE_INTERVAL_SECONDS=0`, `FALLBACK_SETTLE_AFTER_SECONDS=0`).
+## Environment Variables (Explained)
 
-### Logging
+Use `.env.example` as the source of truth. The list below explains each variable and where it is used.
+Client and facilitator signers are different entities; use distinct keys.
 
-Set `LOG_LEVEL` to `debug` for verbose output and `LOG_FORMAT=json` for structured logs.
+### Core wiring
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `FACILITATOR_PRIVATE_KEY` | facilitator | Signer for receipt verification + settlement actions. |
+| `CLIENT_PRIVATE_KEY` | client | Signer for receipt creation + debit wallet funding. |
+| `SERVER_ADDRESS` | server | Payee address included in payment requirements. |
+| `FACILITATOR_URL` | server | Base URL for the facilitator (e.g. `http://localhost:4022`). |
+| `RESOURCE_SERVER_URL` | client | Base URL for the resource server (e.g. `http://localhost:4021`). |
+
+### Settlement + contracts
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `SETTLEMENT_MODE` | facilitator | `synthetic` (default) or `onchain` (real settlement tx). |
+| `SETTLEMENT_CONTRACT` | facilitator | Settlement wallet contract address (owned by the facilitator). |
+| `DEBIT_WALLET_CONTRACT` | facilitator, client | Deployed debit wallet contract address (owned by the client). |
+| `WITHDRAW_DELAY_SECONDS` | facilitator | Must match the on-chain debit wallet configuration. |
+| `AUTHORIZED_PROCESSORS` | facilitator | Comma-separated allowlist for settlement processors. |
+
+### Scheduling controls
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `AUTO_SETTLE_INTERVAL_SECONDS` | facilitator | Auto-settlement scheduler tick. |
+| `AUTO_SETTLE_AFTER_SECONDS` | facilitator | Minimum idle time before auto-settlement. |
+| `FALLBACK_SETTLE_INTERVAL_SECONDS` | server | Server fallback scheduler tick (set `0` to disable). |
+| `FALLBACK_SETTLE_AFTER_SECONDS` | server | Minimum idle time before server fallback settle. |
+| `SKIP_MANUAL_SETTLE` | client | Skip manual `/settle` call to rely on auto-settlement. |
+
+### Client funding
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `AUTO_DEPOSIT` | client | Auto-approve and deposit ERC-20 into the debit wallet. |
+| `CLIENT_RPC_URL` | client | RPC endpoint required for `AUTO_DEPOSIT`. |
+
+### Logging + ports
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `LOG_LEVEL` | all | `debug`, `info`, `warn`, or `error`. |
+| `LOG_FORMAT` | all | `text` (default) or `json` for structured logs. |
+| `PORT` | all | Override the default listening port per process. |
+
+## Facilitator Deployment Options (External Access)
+
+You can run the facilitator on a server and point the resource server at it via `FACILITATOR_URL`.
+Choose one of the patterns below:
+
+If the facilitator is hosted externally, assume the settlement contract is deployed and owned by the
+facilitator. In that case, you only need to deploy your debit wallet and share its address with the
+facilitator; locally you run just the server and client.
+
+1) Public VM with open port
+
+- Run `pnpm start:facilitator` on the VM.
+- Open the port in your firewall (default `4022`).
+- Set `FACILITATOR_URL=http://<public-ip>:4022` for the resource server.
+- Consider restricting inbound traffic to the resource server IP.
+
+2) Reverse proxy with TLS (recommended)
+
+- Run the facilitator locally on the VM (e.g. port `4022`).
+- Put Nginx in front and expose `https://facilitator.example.com`.
+- Set `FACILITATOR_URL=https://facilitator.example.com` for the resource server.
+
+Example Nginx snippet:
+
+```nginx
+server {
+  server_name facilitator.example.com;
+  location / {
+    proxy_pass http://127.0.0.1:4022;
+    proxy_set_header Host $host;
+  }
+}
+```
+
+3) Tunnel for quick review (ngrok, cloudflared)
+
+- Run a tunnel to port `4022`.
+- Use the tunnel URL as `FACILITATOR_URL`.
+- Useful for short-lived demos; avoid for long-running deployments.
+
+## Logging
+
+Set `LOG_LEVEL=debug` for verbose output and `LOG_FORMAT=json` for structured logs.
 
 ## On-chain Base Sepolia Runbook
 
@@ -87,7 +158,11 @@ curl -L https://foundry.paradigm.xyz | bash
 foundryup
 ```
 
-### 2) Deploy contracts (debit wallet + settlement wallet)
+### 2) Deploy contracts
+
+Choose one of the following paths:
+
+#### 2A) Run the facilitator yourself (deploy settlement + debit wallet)
 
 ```bash
 cd onchain
@@ -96,7 +171,7 @@ forge install foundry-rs/forge-std
 export RPC_URL="https://sepolia.base.org"
 export PRIVATE_KEY="0x..."
 export WITHDRAW_DELAY_SECONDS=86400
-export PROCESSOR="0x..." # facilitator signer address (matches EVM_PRIVATE_KEY)
+export PROCESSOR="0x..." # facilitator signer address (matches FACILITATOR_PRIVATE_KEY)
 
 forge script script/Deploy.s.sol:Deploy --rpc-url $RPC_URL --broadcast
 ```
@@ -104,23 +179,46 @@ forge script script/Deploy.s.sol:Deploy --rpc-url $RPC_URL --broadcast
 The script prints the `DebitWallet` and `SettlementWallet` addresses and sets the processor allowlist
 and processors hash for a single facilitator address.
 
+#### 2B) Use an external facilitator (deploy debit wallet only)
+
+```bash
+cd onchain
+forge install foundry-rs/forge-std
+
+export RPC_URL="https://sepolia.base.org"
+export PRIVATE_KEY="0x..."
+export WITHDRAW_DELAY_SECONDS=86400
+
+forge create src/DebitWallet.sol:DebitWallet \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  --constructor-args $WITHDRAW_DELAY_SECONDS
+```
+
+Record the `DebitWallet` address, then share it with the facilitator. The facilitator will provide
+the `SettlementWallet` address that it controls.
+
 ### 3) Configure the example
 
 Populate `.env` in `examples/typescript/odp-deferred`:
 
 ```
-EVM_PRIVATE_KEY=0x...          # facilitator/client signer
-EVM_ADDRESS=0x...              # payee address
+FACILITATOR_PRIVATE_KEY=0x...  # facilitator signer (only if you run the facilitator locally)
+CLIENT_PRIVATE_KEY=0x...       # client signer
+SERVER_ADDRESS=0x...           # payee address
 FACILITATOR_URL=http://localhost:4022
 RESOURCE_SERVER_URL=http://localhost:4021
-SETTLEMENT_CONTRACT=0x...      # SettlementWallet
-DEBIT_WALLET_CONTRACT=0x...    # DebitWallet
+SETTLEMENT_CONTRACT=0x...      # SettlementWallet (from facilitator if external)
+DEBIT_WALLET_CONTRACT=0x...    # DebitWallet (deployed by you)
 WITHDRAW_DELAY_SECONDS=86400
-SETTLEMENT_MODE=onchain
-EVM_RPC_URL=https://base-sepolia.g.alchemy.com/v2/...
+SETTLEMENT_MODE=onchain        # only used by the facilitator
+CLIENT_RPC_URL=https://base-sepolia.g.alchemy.com/v2/...
 ```
 
-Make sure the `EVM_PRIVATE_KEY` account has Base Sepolia ETH for gas and Base Sepolia USDC for the deposit.
+Make sure the facilitator signer has Base Sepolia ETH for settlement gas, and the client signer has
+Base Sepolia ETH + USDC for the debit wallet deposit.
+If you are not running the facilitator locally, you can leave `FACILITATOR_PRIVATE_KEY` and
+`SETTLEMENT_MODE` unused on your machine; they are configured on the facilitator host.
 
 ### 4) Run the flow
 

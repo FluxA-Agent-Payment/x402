@@ -5,13 +5,13 @@ import { OdpDeferredEvmScheme } from "@x402/evm/odp-deferred/server";
 config();
 const PORT = process.env.PORT || "4021";
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
-const EVM_ADDRESS = process.env.EVM_ADDRESS;
+const SERVER_ADDRESS = process.env.SERVER_ADDRESS;
 if (!FACILITATOR_URL) {
     console.error("❌ FACILITATOR_URL environment variable is required");
     process.exit(1);
 }
-if (!EVM_ADDRESS) {
-    console.error("❌ EVM_ADDRESS environment variable is required");
+if (!SERVER_ADDRESS) {
+    console.error("❌ SERVER_ADDRESS environment variable is required");
     process.exit(1);
 }
 const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
@@ -23,7 +23,7 @@ const routeConfig = {
     scheme: "odp-deferred",
     price: "$0.001",
     network: "eip155:84532",
-    payTo: EVM_ADDRESS,
+    payTo: SERVER_ADDRESS,
     maxTimeoutSeconds: 60,
 };
 const sessionPayments = new Map();

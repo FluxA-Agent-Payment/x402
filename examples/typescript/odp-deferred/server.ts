@@ -15,7 +15,7 @@ const logger = createLogger({ component: "server" });
 
 const PORT = process.env.PORT || "4021";
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
-const EVM_ADDRESS = process.env.EVM_ADDRESS as `0x${string}` | undefined;
+const SERVER_ADDRESS = process.env.SERVER_ADDRESS as `0x${string}` | undefined;
 const fallbackSettleIntervalSeconds = Number(
   process.env.FALLBACK_SETTLE_INTERVAL_SECONDS || "30",
 );
@@ -26,8 +26,8 @@ if (!FACILITATOR_URL) {
   process.exit(1);
 }
 
-if (!EVM_ADDRESS) {
-  logger.error("EVM_ADDRESS environment variable is required");
+if (!SERVER_ADDRESS) {
+  logger.error("SERVER_ADDRESS environment variable is required");
   process.exit(1);
 }
 
@@ -43,7 +43,7 @@ const resourceServer = new x402ResourceServer(facilitatorClient).register(
 logger.info("ODP resource server config", {
   port: PORT,
   facilitatorUrl: FACILITATOR_URL,
-  payTo: EVM_ADDRESS,
+  payTo: SERVER_ADDRESS,
   fallbackSettleIntervalSeconds,
   fallbackSettleAfterSeconds,
 });
@@ -52,7 +52,7 @@ const routeConfig: ResourceConfig = {
   scheme: "odp-deferred",
   price: "$0.001",
   network: "eip155:84532",
-  payTo: EVM_ADDRESS,
+  payTo: SERVER_ADDRESS,
   maxTimeoutSeconds: 60,
 };
 

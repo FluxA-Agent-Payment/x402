@@ -10,14 +10,14 @@ config();
 
 const logger = createLogger({ component: "client" });
 
-const evmPrivateKey = process.env.EVM_PRIVATE_KEY as `0x${string}`;
+const clientPrivateKey = process.env.CLIENT_PRIVATE_KEY as `0x${string}`;
 const BASE_URL = process.env.RESOURCE_SERVER_URL || "http://localhost:4021";
-const EVM_RPC_URL = process.env.EVM_RPC_URL;
+const CLIENT_RPC_URL = process.env.CLIENT_RPC_URL;
 const AUTO_DEPOSIT = (process.env.AUTO_DEPOSIT || "true").toLowerCase() !== "false";
 const SKIP_MANUAL_SETTLE = (process.env.SKIP_MANUAL_SETTLE || "false").toLowerCase() === "true";
 
-if (!evmPrivateKey) {
-  logger.error("EVM_PRIVATE_KEY environment variable is required");
+if (!clientPrivateKey) {
+  logger.error("CLIENT_PRIVATE_KEY environment variable is required");
   process.exit(1);
 }
 
@@ -91,7 +91,7 @@ const getChainId = (network: string): number => {
 };
 
 async function main(): Promise<void> {
-  const account = privateKeyToAccount(evmPrivateKey);
+  const account = privateKeyToAccount(clientPrivateKey);
   const client = new x402Client();
   registerOdpDeferredEvmScheme(client, { signer: account });
 
@@ -126,13 +126,13 @@ async function main(): Promise<void> {
   }
 
   if (AUTO_DEPOSIT) {
-    if (!EVM_RPC_URL) {
-      logger.warn("EVM_RPC_URL not set, skipping auto-deposit.");
+    if (!CLIENT_RPC_URL) {
+      logger.warn("CLIENT_RPC_URL not set, skipping auto-deposit.");
     } else {
       const walletClient = createWalletClient({
         account,
         chain: baseSepolia,
-        transport: http(EVM_RPC_URL),
+        transport: http(CLIENT_RPC_URL),
       }).extend(publicActions);
 
       const extra = requirement.extra as Record<string, unknown>;
