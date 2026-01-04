@@ -6,6 +6,7 @@
   "main": "index.js",
   "scripts": {
     "build": "turbo run build",
+    "build:odp-deferred": "turbo run build --filter @x402/odp-deferred-example",
     "lint": "turbo run lint",
     "lint:check": "turbo run lint:check",
     "format": "turbo run format",

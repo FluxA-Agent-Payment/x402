@@ -9,9 +9,12 @@ funding and facilitator-side batch settlement.
 
 ```bash
 cd ../
-pnpm install && pnpm build
+pnpm install
+pnpm build:odp-deferred
 cd odp-deferred
 ```
+
+The build script uses Turbo to build `@x402/odp-deferred-example` and its dependency graph only.
 
 2) Create your environment file:
 
