@@ -35,7 +35,7 @@ The debit wallet contract interface is chain-specific; see the EVM scheme docume
 
 ## Settlement Scheduling
 
-Facilitators SHOULD batch-settle receipts on a schedule of their choosing. Clients do not need to explicitly trigger settlement. Resource servers MAY call the facilitator `/settle` endpoint when a session is overdue or operationally necessary (for example, if settlement has not occurred within a desired window).
+Facilitators SHOULD batch-settle receipts on a schedule of their choosing and perform the required aggregation logic. Clients do not need to explicitly trigger settlement. Resource servers do not initiate settlement and do not track settlement status; they rely on the facilitator to settle sessions asynchronously.
 
 ## Settlement Response Semantics
 

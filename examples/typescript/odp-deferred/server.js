@@ -26,7 +26,6 @@ const routeConfig = {
     payTo: SERVER_ADDRESS,
     maxTimeoutSeconds: 60,
 };
-const sessionPayments = new Map();
 const requirementsBySession = new Map();
 async function customPaymentMiddleware(req, res, next) {
     if (req.path !== "/metered") {
@@ -89,9 +88,6 @@ async function customPaymentMiddleware(req, res, next) {
         });
         return;
     }
-    if (sessionId) {
-        sessionPayments.set(sessionId, { paymentPayload, requirements: matchingRequirements });
-    }
     res.locals.paymentPayload = paymentPayload;
     res.locals.paymentRequirements = matchingRequirements;
     next();
@@ -107,30 +103,6 @@ app.get("/metered", (req, res) => {
             timestamp: new Date().toISOString(),
         },
     });
-});
-app.post("/settle/:sessionId", async (req, res) => {
-    const sessionId = req.params.sessionId;
-    const entry = sessionPayments.get(sessionId);
-    if (!entry) {
-        return res.status(404).json({
-            error: "Session not found",
-            message: "No receipts recorded for this session",
-        });
-    }
-    try {
-        const settleResult = await resourceServer.settlePayment(entry.paymentPayload, entry.requirements);
-        if (settleResult.success) {
-            sessionPayments.delete(sessionId);
-            requirementsBySession.delete(sessionId);
-        }
-        return res.json(settleResult);
-    }
-    catch (error) {
-        return res.status(500).json({
-            error: "Settlement failed",
-            message: error instanceof Error ? error.message : "Unknown error",
-        });
-    }
 });
 resourceServer.initialize().then(() => {
     app.listen(parseInt(PORT, 10), () => {

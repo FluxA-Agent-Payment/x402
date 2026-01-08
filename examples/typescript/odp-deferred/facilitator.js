@@ -66,24 +66,6 @@ app.post("/verify", async (req, res) => {
         });
     }
 });
-app.post("/settle", async (req, res) => {
-    try {
-        const { paymentPayload, paymentRequirements } = req.body;
-        if (!paymentPayload || !paymentRequirements) {
-            return res.status(400).json({
-                error: "Missing paymentPayload or paymentRequirements",
-            });
-        }
-        const response = await facilitator.settle(paymentPayload, paymentRequirements);
-        res.json(response);
-    }
-    catch (error) {
-        console.error("Settle error:", error);
-        res.status(500).json({
-            error: error instanceof Error ? error.message : "Unknown error",
-        });
-    }
-});
 app.get("/supported", (req, res) => {
     try {
         res.json(facilitator.getSupported());

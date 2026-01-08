@@ -4,7 +4,7 @@ import { createWalletClient, http, publicActions } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
 import { x402Facilitator } from "@x402/core/facilitator";
-import { PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/core/types";
+import { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { toFacilitatorEvmSigner } from "@x402/evm";
 import { registerOdpDeferredEvmScheme } from "@x402/evm/odp-deferred/facilitator";
 import { createLogger } from "./logger";
@@ -172,51 +172,6 @@ app.post("/verify", async (req, res) => {
     res.json(response);
   } catch (error) {
     logger.error("Verify error", { error });
-    res.status(500).json({
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
-});
-
-app.post("/settle", async (req, res) => {
-  try {
-    const { paymentPayload, paymentRequirements } = req.body as {
-      paymentPayload: PaymentPayload;
-      paymentRequirements: PaymentRequirements;
-    };
-
-    if (!paymentPayload || !paymentRequirements) {
-      return res.status(400).json({
-        error: "Missing paymentPayload or paymentRequirements",
-      });
-    }
-
-    const response: SettleResponse = await facilitator.settle(
-      paymentPayload,
-      paymentRequirements,
-    );
-
-    if (response.success) {
-      const sessionId = getSessionIdFromPayload(paymentPayload);
-      if (sessionId) {
-        pendingSessions.delete(sessionId);
-      }
-      logger.info("Settlement succeeded", {
-        sessionId,
-        transaction: response.transaction,
-        mode: settlementMode,
-      });
-    } else {
-      logger.warn("Settlement failed", {
-        errorReason: response.errorReason,
-        sessionId: getSessionIdFromPayload(paymentPayload),
-        mode: settlementMode,
-      });
-    }
-
-    res.json(response);
-  } catch (error) {
-    logger.error("Settle error", { error });
     res.status(500).json({
       error: error instanceof Error ? error.message : "Unknown error",
     });

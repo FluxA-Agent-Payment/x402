@@ -208,7 +208,7 @@ Settlement is performed by submitting a batch to the `settlementContract`. In a 
 
 Implementations MAY verify receipts on-chain directly or by validating a succinct proof (e.g., Groth16) that attests to receipt validity and totals. Regardless of method, the contract MUST enforce the same receipt rules and update `nextNonce` atomically.
 
-Facilitators MAY batch-settle sessions on a schedule of their choosing. Resource servers MAY call `/settle` for a session if settlement has not occurred within an operationally desired window.
+Facilitators MAY batch-settle sessions on a schedule of their choosing and perform aggregation internally. Resource servers do not call `/settle` and do not maintain settlement status.
 
 ## Appendix
 

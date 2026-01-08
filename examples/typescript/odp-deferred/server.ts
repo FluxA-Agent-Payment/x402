@@ -16,10 +16,6 @@ const logger = createLogger({ component: "server" });
 const PORT = process.env.PORT || "4021";
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
 const SERVER_ADDRESS = process.env.SERVER_ADDRESS as `0x${string}` | undefined;
-const fallbackSettleIntervalSeconds = Number(
-  process.env.FALLBACK_SETTLE_INTERVAL_SECONDS || "30",
-);
-const fallbackSettleAfterSeconds = Number(process.env.FALLBACK_SETTLE_AFTER_SECONDS || "120");
 
 if (!FACILITATOR_URL) {
   logger.error("FACILITATOR_URL environment variable is required");
@@ -44,8 +40,6 @@ logger.info("ODP resource server config", {
   port: PORT,
   facilitatorUrl: FACILITATOR_URL,
   payTo: SERVER_ADDRESS,
-  fallbackSettleIntervalSeconds,
-  fallbackSettleAfterSeconds,
 });
 
 const routeConfig: ResourceConfig = {
@@ -56,31 +50,7 @@ const routeConfig: ResourceConfig = {
   maxTimeoutSeconds: 60,
 };
 
-const sessionPayments = new Map<
-  string,
-  { paymentPayload: PaymentPayload; requirements: PaymentRequirements; lastReceiptAt: number }
->();
 const requirementsBySession = new Map<string, PaymentRequirements>();
-
-const settleSession = async (sessionId: string) => {
-  const entry = sessionPayments.get(sessionId);
-
-  if (!entry) {
-    return undefined;
-  }
-
-  const settleResult = await resourceServer.settlePayment(
-    entry.paymentPayload,
-    entry.requirements,
-  );
-
-  if (settleResult.success) {
-    sessionPayments.delete(sessionId);
-    requirementsBySession.delete(sessionId);
-  }
-
-  return settleResult;
-};
 
 async function customPaymentMiddleware(
   req: Request,
@@ -172,11 +142,6 @@ async function customPaymentMiddleware(
   }
 
   if (sessionId) {
-    sessionPayments.set(sessionId, {
-      paymentPayload,
-      requirements: matchingRequirements,
-      lastReceiptAt: Date.now(),
-    });
     logger.debug("Receipt accepted", { sessionId, payer: verifyResult.payer });
   }
 
@@ -199,76 +164,6 @@ app.get("/metered", (req, res) => {
     },
   });
 });
-
-app.post("/settle/:sessionId", async (req, res) => {
-  const sessionId = req.params.sessionId;
-
-  try {
-    const settleResult = await settleSession(sessionId);
-
-    if (!settleResult) {
-      return res.status(404).json({
-        error: "Session not found",
-        message: "No receipts recorded for this session",
-      });
-    }
-
-    if (settleResult.success) {
-      logger.info("Manual settlement succeeded", {
-        sessionId,
-        transaction: settleResult.transaction,
-      });
-    } else {
-      logger.warn("Manual settlement failed", {
-        sessionId,
-        errorReason: settleResult.errorReason,
-      });
-    }
-
-    return res.json(settleResult);
-  } catch (error) {
-    logger.error("Manual settlement error", { sessionId, error });
-    return res.status(500).json({
-      error: "Settlement failed",
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
-});
-
-const runFallbackSettlement = async (): Promise<void> => {
-  if (sessionPayments.size === 0) {
-    return;
-  }
-
-  const now = Date.now();
-  for (const [sessionId, entry] of sessionPayments) {
-    if (fallbackSettleAfterSeconds <= 0) {
-      continue;
-    }
-
-    if (now - entry.lastReceiptAt < fallbackSettleAfterSeconds * 1000) {
-      continue;
-    }
-
-    try {
-      const settleResult = await settleSession(sessionId);
-      if (settleResult?.success) {
-        logger.info("Fallback-settled session", {
-          sessionId,
-          transaction: settleResult.transaction,
-        });
-      }
-    } catch (error) {
-      logger.error("Fallback settlement error", { sessionId, error });
-    }
-  }
-};
-
-if (fallbackSettleIntervalSeconds > 0 && fallbackSettleAfterSeconds > 0) {
-  setInterval(() => {
-    void runFallbackSettlement();
-  }, fallbackSettleIntervalSeconds * 1000);
-}
 
 resourceServer.initialize().then(() => {
   app.listen(parseInt(PORT, 10), () => {

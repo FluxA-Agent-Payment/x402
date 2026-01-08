@@ -40,7 +40,7 @@ The x402 protocol follows a standard request-response cycle with payment integra
 1. **Client Request**: Client makes a request to a resource server
 2. **Payment Required Response**: If no valid payment is attached, the server responds with a payment required signal and payment requirements
 3. **Payment Authorization Request**: Client submits a signed payment authorization in the subsequent request
-4. **Settlement Response**: Server verifies the payment authorization and initiates blockchain settlement
+4. **Settlement Response**: Server verifies the payment authorization; settlement may be executed immediately or deferred and handled by a facilitator
 
 **3. Protocol Components**
 
@@ -54,7 +54,7 @@ The x402 protocol involves three primary components:
 
 The x402 protocol defines standard response types with specific semantics:
 
-- **Success**: Request successful, payment verified and settled
+- **Success**: Request successful, payment verified; settlement may be immediate or deferred depending on the scheme
 - **Payment Required**: Payment required to access the resource
 - **Invalid Request**: Invalid payment payload or payment requirements
 - **Server Error**: Server error during payment processing
@@ -216,7 +216,7 @@ The `Authorization` object contains the following fields:
 
 **5.3.1 JSON Structure**
 
-After payment settlement, the server includes transaction details in the payment response field as JSON:
+When a settlement transaction is available, the server includes transaction details in the payment response field as JSON. For deferred settlement schemes, servers MAY omit the response and provide settlement status out-of-band.
 
 ```json
 {
@@ -312,13 +312,13 @@ Full SVM details are specified in `specs/schemes/exact/scheme_exact_svm.md`.
 
 **6.3 Open Deferred Payment (ODP overview)**
 
-`odp-deferred` is a session-based deferred settlement scheme for high-frequency micro-payments. Clients sign a SessionApproval once per session and a Receipt per request. Payers lock funds in a debit wallet contract, facilitators verify balances on-chain, and settlements occur later in batches (often on a facilitator-managed schedule).
+`odp-deferred` is a session-based deferred settlement scheme for high-frequency micro-payments. Clients sign a SessionApproval once per session and a Receipt per request. Payers lock funds in a debit wallet contract, facilitators verify balances on-chain, and settlements occur later in batches (often on a facilitator-managed schedule). Resource servers do not initiate settlement or track settlement status in this scheme.
 
 Full scheme details are specified in `specs/schemes/odp-deferred/scheme_odp_deferred.md` and `specs/schemes/odp-deferred/scheme_odp_deferred_evm.md`.
 
 **7. Facilitator Interface**
 
-The facilitator provides HTTP REST APIs for payment verification and settlement. This allows resource servers to delegate blockchain operations to trusted third parties or host the endpoints themselves. Note that while the core x402 protocol is transport-agnostic, facilitator APIs are currently standardized as HTTP endpoints.
+The facilitator provides HTTP REST APIs for payment verification and settlement. This allows resource servers to delegate blockchain operations to trusted third parties or host the endpoints themselves. Some schemes (such as `odp-deferred`) rely on facilitator-managed batch settlement and do not require resource servers to call `/settle`. Note that while the core x402 protocol is transport-agnostic, facilitator APIs are currently standardized as HTTP endpoints.
 
 **7.1 POST /verify**
 
@@ -409,6 +409,7 @@ Example with actual data:
 **7.2 POST /settle**
 
 Executes a verified payment by broadcasting the transaction to the blockchain.
+This endpoint is optional for schemes that handle settlement asynchronously (e.g., `odp-deferred`).
 
 **Request:** Same as `/verify` endpoint
 

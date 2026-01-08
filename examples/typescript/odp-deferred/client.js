@@ -41,11 +41,7 @@ async function main() {
     if (!sessionId) {
         throw new Error("Session ID missing from payload");
     }
-    const settleResponse = await fetch(`${BASE_URL}/settle/${sessionId}`, {
-        method: "POST",
-    });
-    const settleBody = await settleResponse.json();
-    console.log("Settlement response:", settleBody);
+    console.log("Session complete; facilitator will settle asynchronously.", { sessionId });
 }
 main().catch(error => {
     console.error(error);

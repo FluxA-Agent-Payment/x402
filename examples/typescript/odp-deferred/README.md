@@ -50,9 +50,7 @@ pnpm start:client
 
 7) Verify settlement behavior:
 
-- Manual settlement: the client calls `POST /settle/:sessionId` and the logs show "Settlement succeeded".
-- Auto settlement: set `SKIP_MANUAL_SETTLE=true`, disable fallback (`FALLBACK_SETTLE_INTERVAL_SECONDS=0`,
-  `FALLBACK_SETTLE_AFTER_SECONDS=0`), and wait for "Auto-settled session" in the facilitator logs.
+- Auto settlement: wait for "Auto-settled session" in the facilitator logs once the session is idle.
 
 ## Environment Variables (Explained)
 
@@ -85,9 +83,6 @@ Client and facilitator signers are different entities; use distinct keys.
 | --- | --- | --- |
 | `AUTO_SETTLE_INTERVAL_SECONDS` | facilitator | Auto-settlement scheduler tick. |
 | `AUTO_SETTLE_AFTER_SECONDS` | facilitator | Minimum idle time before auto-settlement. |
-| `FALLBACK_SETTLE_INTERVAL_SECONDS` | server | Server fallback scheduler tick (set `0` to disable). |
-| `FALLBACK_SETTLE_AFTER_SECONDS` | server | Minimum idle time before server fallback settle. |
-| `SKIP_MANUAL_SETTLE` | client | Skip manual `/settle` call to rely on auto-settlement. |
 
 ### Client funding
 
@@ -244,4 +239,4 @@ pnpm start:client
 ```
 
 The client will auto-deposit USDC into the debit wallet if needed, then send paid requests.
-In `onchain` settlement mode, the facilitator (or fallback) submits a real settlement transaction.
+In `onchain` settlement mode, the facilitator submits a real settlement transaction.

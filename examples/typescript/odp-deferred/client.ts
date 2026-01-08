@@ -14,7 +14,6 @@ const clientPrivateKey = process.env.CLIENT_PRIVATE_KEY as `0x${string}`;
 const BASE_URL = process.env.RESOURCE_SERVER_URL || "http://localhost:4021";
 const CLIENT_RPC_URL = process.env.CLIENT_RPC_URL;
 const AUTO_DEPOSIT = (process.env.AUTO_DEPOSIT || "true").toLowerCase() !== "false";
-const SKIP_MANUAL_SETTLE = (process.env.SKIP_MANUAL_SETTLE || "false").toLowerCase() === "true";
 
 if (!clientPrivateKey) {
   logger.error("CLIENT_PRIVATE_KEY environment variable is required");
@@ -98,7 +97,6 @@ async function main(): Promise<void> {
   logger.info("ODP client config", {
     baseUrl: BASE_URL,
     autoDeposit: AUTO_DEPOSIT,
-    skipManualSettle: SKIP_MANUAL_SETTLE,
   });
 
   const initial = await fetch(url);
@@ -217,17 +215,7 @@ async function main(): Promise<void> {
     throw new Error("Session ID missing from payload");
   }
 
-  if (SKIP_MANUAL_SETTLE) {
-    logger.info("Skipping manual settlement; waiting for facilitator auto-settle.");
-    return;
-  }
-
-  const settleResponse = await fetch(`${BASE_URL}/settle/${sessionId}`, {
-    method: "POST",
-  });
-  const settleBody = await settleResponse.json();
-
-  logger.info("Settlement response", settleBody as Record<string, unknown>);
+  logger.info("Session complete; facilitator will settle asynchronously.", { sessionId });
 }
 
 main().catch(error => {
