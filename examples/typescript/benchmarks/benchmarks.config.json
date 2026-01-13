@@ -1,0 +1,43 @@
+{
+  "network": "eip155:84532",
+  "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "price": "$0.001",
+  "serverAddress": "0x000000000000000000000000000000000000dEaD",
+  "mock": {
+    "debitWallet": "0x0000000000000000000000000000000000000001",
+    "settlementContract": "0x0000000000000000000000000000000000000002",
+    "withdrawDelaySeconds": "86400",
+    "debitWalletBalance": "100000000000"
+  },
+  "autoSettleIntervalSeconds": 1,
+  "autoSettleMaxReceipts": 200,
+  "gas": {
+    "exactTxGas": 65000,
+    "odpTxGas": 120000,
+    "gasPriceGwei": 10,
+    "ethUsd": 3000
+  },
+  "scenarios": [
+    {
+      "name": "single-session-1k",
+      "sessions": 1,
+      "paymentsPerSession": 1000,
+      "sessionConcurrency": 1,
+      "requestConcurrency": 50
+    },
+    {
+      "name": "single-session-10k",
+      "sessions": 1,
+      "paymentsPerSession": 10000,
+      "sessionConcurrency": 1,
+      "requestConcurrency": 100
+    },
+    {
+      "name": "multi-session-10k",
+      "sessions": 10,
+      "paymentsPerSession": 1000,
+      "sessionConcurrency": 5,
+      "requestConcurrency": 50
+    }
+  ]
+}

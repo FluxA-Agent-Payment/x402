@@ -4,6 +4,7 @@ packages:
   - "fullstack/*"
   - "facilitator"
   - "odp-deferred"
+  - "benchmarks"
   - "legacy/facilitator"
   - "legacy/servers/*"
   - "legacy/clients/*"

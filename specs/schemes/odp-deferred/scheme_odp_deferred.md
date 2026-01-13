@@ -24,8 +24,8 @@ This scheme is transport-agnostic and uses the standard x402 `PaymentRequired` a
 2. Client locks funds in a debit wallet contract before opening a session.
 3. Client retries with `PaymentPayload` containing a Receipt and, when opening a session, a SessionApproval.
 4. Server or facilitator verifies signatures, debit wallet funding, and session state, records the Receipt, and returns the protected resource.
-5. A settlement processor batches receipts and submits a settlement transaction later.
-6. The on-chain contract verifies the batch, updates session state, and executes transfers.
+5. A settlement processor batches receipts (optionally as partial batches) and submits settlement transactions later.
+6. The on-chain contract verifies each batch, updates session state, and executes transfers.
 
 ## Debit Wallet Funding and Withdrawal
 
@@ -36,6 +36,8 @@ The debit wallet contract interface is chain-specific; see the EVM scheme docume
 ## Settlement Scheduling
 
 Facilitators SHOULD batch-settle receipts on a schedule of their choosing and perform the required aggregation logic. Clients do not need to explicitly trigger settlement. Resource servers do not initiate settlement and do not track settlement status; they rely on the facilitator to settle sessions asynchronously.
+
+Facilitators MAY settle a subset of receipts when a scheduling interval is reached and keep the session open. Subsequent receipts continue using higher nonces in the same session. Facilitators MUST ensure each receipt nonce is settled at most once (no overlapping nonce ranges).
 
 ## Settlement Response Semantics
 
@@ -50,6 +52,7 @@ ODP allows settlement to occur after the resource response. Implementations MAY 
 - Asset and payee MUST match the SessionApproval and `PaymentRequirements`.
 - Settlement processors MUST be authorized when a processor allowlist is configured.
 - Batch settlement MUST enforce a contiguous nonce range and update `nextNonce` atomically.
+- A receipt nonce MUST NOT be settled more than once across multiple batches.
 
 ## References
 

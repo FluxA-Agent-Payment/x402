@@ -312,7 +312,7 @@ Full SVM details are specified in `specs/schemes/exact/scheme_exact_svm.md`.
 
 **6.3 Open Deferred Payment (ODP overview)**
 
-`odp-deferred` is a session-based deferred settlement scheme for high-frequency micro-payments. Clients sign a SessionApproval once per session and a Receipt per request. Payers lock funds in a debit wallet contract, facilitators verify balances on-chain, and settlements occur later in batches (often on a facilitator-managed schedule). Resource servers do not initiate settlement or track settlement status in this scheme.
+`odp-deferred` is a session-based deferred settlement scheme for high-frequency micro-payments. Clients sign a SessionApproval once per session and a Receipt per request. Payers lock funds in a debit wallet contract, facilitators verify balances on-chain, and settlements occur later in batches (often on a facilitator-managed schedule). Facilitators MAY settle sessions in partial batches over time; sessions remain open and receipt nonces MUST NOT be settled twice. Resource servers do not initiate settlement or track settlement status in this scheme.
 
 Full scheme details are specified in `specs/schemes/odp-deferred/scheme_odp_deferred.md` and `specs/schemes/odp-deferred/scheme_odp_deferred_evm.md`.
 

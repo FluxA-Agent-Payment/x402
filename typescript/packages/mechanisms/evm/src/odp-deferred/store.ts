@@ -7,6 +7,7 @@ export type OdpDeferredSessionRecord = {
   nextNonce: bigint;
   spent: bigint;
   receipts: OdpDeferredReceipt[];
+  settling: boolean;
 };
 
 export interface OdpDeferredStore {

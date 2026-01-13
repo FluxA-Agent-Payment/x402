@@ -50,7 +50,9 @@ pnpm start:client
 
 7) Verify settlement behavior:
 
-- Auto settlement: wait for "Auto-settled session" in the facilitator logs once the session is idle.
+- Auto settlement: the facilitator settles on a fixed interval and logs "Auto-settled session" whenever
+  receipts are available. If `AUTO_SETTLE_MAX_RECEIPTS` is set, the facilitator may settle in partial
+  batches until all receipts are cleared.
 
 ## Environment Variables (Explained)
 
@@ -82,7 +84,7 @@ Client and facilitator signers are different entities; use distinct keys.
 | Variable | Used by | Purpose |
 | --- | --- | --- |
 | `AUTO_SETTLE_INTERVAL_SECONDS` | facilitator | Auto-settlement scheduler tick. |
-| `AUTO_SETTLE_AFTER_SECONDS` | facilitator | Minimum idle time before auto-settlement. |
+| `AUTO_SETTLE_MAX_RECEIPTS` | facilitator | Max receipts per settlement batch (omit/0 = settle all). |
 
 ### Client funding
 
@@ -210,6 +212,7 @@ SETTLEMENT_CONTRACT=0x...      # SettlementWallet (from facilitator if external)
 DEBIT_WALLET_CONTRACT=0x...    # DebitWallet (deployed by you)
 WITHDRAW_DELAY_SECONDS=86400
 SETTLEMENT_MODE=onchain        # only used by the facilitator
+AUTO_SETTLE_MAX_RECEIPTS=200   # optional batching for partial settlement
 CLIENT_RPC_URL=https://base-sepolia.g.alchemy.com/v2/...
 ```
 

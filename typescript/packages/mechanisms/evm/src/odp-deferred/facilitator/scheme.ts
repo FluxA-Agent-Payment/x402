@@ -89,6 +89,7 @@ export interface OdpDeferredEvmSchemeConfig {
   withdrawDelaySeconds: string;
   settlementMode?: "synthetic" | "onchain";
   authorizedProcessors?: `0x${string}`[];
+  maxReceiptsPerSettlement?: number;
   store?: OdpDeferredStore;
   logger?: OdpDeferredLogger;
 }
@@ -107,6 +108,7 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
       withdrawDelaySeconds: config.withdrawDelaySeconds,
       settlementMode: config.settlementMode ?? "synthetic",
       authorizedProcessors: config.authorizedProcessors?.map(address => getAddress(address)),
+      maxReceiptsPerSettlement: config.maxReceiptsPerSettlement,
       store: config.store,
     };
     this.store = config.store ?? new InMemoryOdpDeferredStore();
@@ -262,6 +264,7 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
           nextNonce: BigInt(sessionApproval.startNonce),
           spent: 0n,
           receipts: [],
+          settling: false,
         };
       } else if (
         sessionRecord.approval.sessionId !== sessionApproval.sessionId ||
@@ -508,161 +511,191 @@ export class OdpDeferredEvmScheme implements SchemeNetworkFacilitator {
       };
     }
 
-    const receipts = sessionRecord.receipts;
-    if (receipts.length === 0) {
+    if (sessionRecord.settling) {
       return {
         success: false,
-        errorReason: "no_receipts",
+        errorReason: "settlement_in_progress",
         transaction: "",
         network: payload.accepted.network,
         payer: sessionRecord.approval.payer,
       };
     }
 
-    const debitWalletState = await this.getDebitWalletState(
-      extras.debitWallet,
-      sessionRecord.approval.payer,
-      sessionRecord.approval.asset,
-    );
+    sessionRecord.settling = true;
+    this.store.setSession(receipt.sessionId, sessionRecord);
 
-    if (debitWalletState.withdrawDelaySeconds !== BigInt(extras.withdrawDelaySeconds)) {
-      return {
-        success: false,
-        errorReason: "debit_wallet_withdraw_delay_mismatch",
-        transaction: "",
-        network: payload.accepted.network,
-        payer: sessionRecord.approval.payer,
-      };
-    }
+    try {
+      const receiptsSnapshot = [...sessionRecord.receipts];
+      const maxReceiptsPerSettlement =
+        this.config.maxReceiptsPerSettlement && this.config.maxReceiptsPerSettlement > 0
+          ? this.config.maxReceiptsPerSettlement
+          : undefined;
+      const batchReceipts = maxReceiptsPerSettlement
+        ? receiptsSnapshot.slice(0, maxReceiptsPerSettlement)
+        : receiptsSnapshot;
 
-    const total = receipts.reduce((sum, entry) => sum + BigInt(entry.amount), 0n);
-
-    if (total > debitWalletState.balance) {
-      return {
-        success: false,
-        errorReason: "insufficient_debit_wallet_balance",
-        transaction: "",
-        network: payload.accepted.network,
-        payer: sessionRecord.approval.payer,
-      };
-    }
-
-    const startNonce = BigInt(receipts[0].nonce);
-    const endNonce = BigInt(receipts[receipts.length - 1].nonce);
-
-    for (let i = 0; i < receipts.length; i += 1) {
-      const expected = startNonce + BigInt(i);
-      if (BigInt(receipts[i].nonce) !== expected) {
+      if (batchReceipts.length === 0) {
         return {
           success: false,
-          errorReason: "receipt_nonce_gap",
-          transaction: "",
-          network: payload.accepted.network,
-          payer: sessionRecord.approval.payer,
-        };
-      }
-    }
-
-    if (this.config.settlementMode === "onchain") {
-      if (!sessionRecord.sessionSignature) {
-        return {
-          success: false,
-          errorReason: "missing_session_signature",
+          errorReason: "no_receipts",
           transaction: "",
           network: payload.accepted.network,
           payer: sessionRecord.approval.payer,
         };
       }
 
-      const approvalArgs = {
-        payer: sessionRecord.approval.payer,
-        payee: sessionRecord.approval.payee,
-        asset: sessionRecord.approval.asset,
-        maxSpend: BigInt(sessionRecord.approval.maxSpend),
-        expiry: BigInt(sessionRecord.approval.expiry),
-        sessionId: sessionRecord.approval.sessionId,
-        startNonce: BigInt(sessionRecord.approval.startNonce),
-        authorizedProcessorsHash: sessionRecord.approval.authorizedProcessorsHash,
-      };
+      const debitWalletState = await this.getDebitWalletState(
+        extras.debitWallet,
+        sessionRecord.approval.payer,
+        sessionRecord.approval.asset,
+      );
 
-      try {
-        this.logger.info("Submitting on-chain settlement", {
-          sessionId: sessionRecord.approval.sessionId,
+      if (debitWalletState.withdrawDelaySeconds !== BigInt(extras.withdrawDelaySeconds)) {
+        return {
+          success: false,
+          errorReason: "debit_wallet_withdraw_delay_mismatch",
+          transaction: "",
+          network: payload.accepted.network,
           payer: sessionRecord.approval.payer,
-          startNonce: startNonce.toString(),
-          endNonce: endNonce.toString(),
-          total: total.toString(),
-        });
+        };
+      }
 
-        const txHash = await this.signer.writeContract({
-          address: this.config.settlementContract,
-          abi: settlementWalletAbi,
-          functionName: "settleSession",
-          args: [approvalArgs, sessionRecord.sessionSignature, startNonce, endNonce, total],
-        });
+      const total = batchReceipts.reduce((sum, entry) => sum + BigInt(entry.amount), 0n);
 
-        this.logger.info("On-chain settlement submitted", {
-          sessionId: sessionRecord.approval.sessionId,
-          txHash,
-        });
+      if (total > debitWalletState.balance) {
+        return {
+          success: false,
+          errorReason: "insufficient_debit_wallet_balance",
+          transaction: "",
+          network: payload.accepted.network,
+          payer: sessionRecord.approval.payer,
+        };
+      }
 
-        const receiptResult = await this.signer.waitForTransactionReceipt({ hash: txHash });
-        this.logger.info("On-chain settlement receipt", {
-          sessionId: sessionRecord.approval.sessionId,
-          txHash,
-          status: receiptResult.status,
-        });
+      const startNonce = BigInt(batchReceipts[0].nonce);
+      const endNonce = BigInt(batchReceipts[batchReceipts.length - 1].nonce);
 
-        if (receiptResult.status !== "success") {
+      for (let i = 0; i < batchReceipts.length; i += 1) {
+        const expected = startNonce + BigInt(i);
+        if (BigInt(batchReceipts[i].nonce) !== expected) {
           return {
             success: false,
-            errorReason: "settlement_transaction_failed",
-            transaction: txHash,
+            errorReason: "receipt_nonce_gap",
+            transaction: "",
+            network: payload.accepted.network,
+            payer: sessionRecord.approval.payer,
+          };
+        }
+      }
+
+      if (this.config.settlementMode === "onchain") {
+        if (!sessionRecord.sessionSignature) {
+          return {
+            success: false,
+            errorReason: "missing_session_signature",
+            transaction: "",
             network: payload.accepted.network,
             payer: sessionRecord.approval.payer,
           };
         }
 
-        sessionRecord.receipts = [];
-        this.store.setSession(receipt.sessionId, sessionRecord);
-
-        return {
-          success: true,
-          transaction: txHash,
-          network: payload.accepted.network,
+        const approvalArgs = {
           payer: sessionRecord.approval.payer,
-        };
-      } catch (error) {
-        this.logger.error("On-chain settlement error", {
+          payee: sessionRecord.approval.payee,
+          asset: sessionRecord.approval.asset,
+          maxSpend: BigInt(sessionRecord.approval.maxSpend),
+          expiry: BigInt(sessionRecord.approval.expiry),
           sessionId: sessionRecord.approval.sessionId,
-          error,
-        });
-        return {
-          success: false,
-          errorReason: error instanceof Error ? error.message : "settlement_transaction_failed",
-          transaction: "",
-          network: payload.accepted.network,
-          payer: sessionRecord.approval.payer,
+          startNonce: BigInt(sessionRecord.approval.startNonce),
+          authorizedProcessorsHash: sessionRecord.approval.authorizedProcessorsHash,
         };
+
+        try {
+          this.logger.info("Submitting on-chain settlement", {
+            sessionId: sessionRecord.approval.sessionId,
+            payer: sessionRecord.approval.payer,
+            startNonce: startNonce.toString(),
+            endNonce: endNonce.toString(),
+            total: total.toString(),
+          });
+
+          const txHash = await this.signer.writeContract({
+            address: this.config.settlementContract,
+            abi: settlementWalletAbi,
+            functionName: "settleSession",
+            args: [approvalArgs, sessionRecord.sessionSignature, startNonce, endNonce, total],
+          });
+
+          this.logger.info("On-chain settlement submitted", {
+            sessionId: sessionRecord.approval.sessionId,
+            txHash,
+          });
+
+          const receiptResult = await this.signer.waitForTransactionReceipt({ hash: txHash });
+          this.logger.info("On-chain settlement receipt", {
+            sessionId: sessionRecord.approval.sessionId,
+            txHash,
+            status: receiptResult.status,
+          });
+
+          if (receiptResult.status !== "success") {
+            return {
+              success: false,
+              errorReason: "settlement_transaction_failed",
+              transaction: txHash,
+              network: payload.accepted.network,
+              payer: sessionRecord.approval.payer,
+            };
+          }
+
+          sessionRecord.receipts = sessionRecord.receipts.filter(entry => {
+            const nonce = BigInt(entry.nonce);
+            return nonce < startNonce || nonce > endNonce;
+          });
+
+          return {
+            success: true,
+            transaction: txHash,
+            network: payload.accepted.network,
+            payer: sessionRecord.approval.payer,
+          };
+        } catch (error) {
+          this.logger.error("On-chain settlement error", {
+            sessionId: sessionRecord.approval.sessionId,
+            error,
+          });
+          return {
+            success: false,
+            errorReason: error instanceof Error ? error.message : "settlement_transaction_failed",
+            transaction: "",
+            network: payload.accepted.network,
+            payer: sessionRecord.approval.payer,
+          };
+        }
       }
+
+      const txHash = keccak256(
+        encodePacked(
+          ["bytes32", "uint256", "uint256", "uint256"],
+          [receipt.sessionId, startNonce, endNonce, total],
+        ),
+      );
+
+      sessionRecord.receipts = sessionRecord.receipts.filter(entry => {
+        const nonce = BigInt(entry.nonce);
+        return nonce < startNonce || nonce > endNonce;
+      });
+
+      return {
+        success: true,
+        transaction: txHash,
+        network: payload.accepted.network,
+        payer: sessionRecord.approval.payer,
+      };
+    } finally {
+      sessionRecord.settling = false;
+      this.store.setSession(receipt.sessionId, sessionRecord);
     }
-
-    const txHash = keccak256(
-      encodePacked(
-        ["bytes32", "uint256", "uint256", "uint256"],
-        [receipt.sessionId, startNonce, endNonce, total],
-      ),
-    );
-
-    sessionRecord.receipts = [];
-    this.store.setSession(receipt.sessionId, sessionRecord);
-
-    return {
-      success: true,
-      transaction: txHash,
-      network: payload.accepted.network,
-      payer: sessionRecord.approval.payer,
-    };
   }
 
   private async verifySessionApproval(

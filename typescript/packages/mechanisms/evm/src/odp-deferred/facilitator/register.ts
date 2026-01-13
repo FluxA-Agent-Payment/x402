@@ -20,6 +20,7 @@ export function registerOdpDeferredEvmScheme(
       withdrawDelaySeconds: config.withdrawDelaySeconds,
       settlementMode: config.settlementMode,
       authorizedProcessors: config.authorizedProcessors,
+      maxReceiptsPerSettlement: config.maxReceiptsPerSettlement,
       store: config.store,
       logger: config.logger,
     }),

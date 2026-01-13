@@ -1150,6 +1150,40 @@ importers:
         specifier: ^3.0.5
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.17.2)(jiti@2.6.1)(jsdom@26.1.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(lightningcss@1.30.2)(tsx@4.20.4)(yaml@2.8.1)
 
+  benchmarks:
+    dependencies:
+      '@x402/core':
+        specifier: workspace:*
+        version: link:../../../typescript/packages/core
+      '@x402/evm':
+        specifier: workspace:*
+        version: link:../../../typescript/packages/mechanisms/evm
+      '@x402/express':
+        specifier: workspace:*
+        version: link:../../../typescript/packages/http/express
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      express:
+        specifier: ^4.19.2
+        version: 4.21.2
+      viem:
+        specifier: ^2.21.54
+        version: 2.40.3(bufferutil@4.0.9)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@4.1.13)
+    devDependencies:
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.25
+      '@types/node':
+        specifier: ^22.10.1
+        version: 22.17.2
+      tsx:
+        specifier: ^4.19.2
+        version: 4.20.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.2
+
   clients/advanced:
     dependencies:
       '@scure/base':

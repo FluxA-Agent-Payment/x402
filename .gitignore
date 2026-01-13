@@ -14,3 +14,4 @@ examples/typescript/odp-deferred/onchain/out/
 examples/typescript/odp-deferred/onchain/cache/
 examples/typescript/odp-deferred/onchain/lib/
 examples/typescript/odp-deferred/onchain/broadcast/
+examples/typescript/benchmarks/results/

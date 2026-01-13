@@ -7,6 +7,7 @@
   "scripts": {
     "build": "turbo run build",
     "build:odp-deferred": "turbo run build --filter @x402/odp-deferred-example",
+    "bench:x402": "pnpm --filter @x402/benchmarks start",
     "lint": "turbo run lint",
     "lint:check": "turbo run lint:check",
     "format": "turbo run format",

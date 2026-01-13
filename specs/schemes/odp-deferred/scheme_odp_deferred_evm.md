@@ -2,7 +2,7 @@
 
 ## Summary
 
-The `odp-deferred` scheme on EVM chains uses EIP-712 signatures to establish a session and authorize per-request receipts. Resource servers or facilitators verify receipts immediately and record them off-chain. Settlement processors later batch receipts into on-chain settlements that enforce a contiguous nonce range and session spend limits.
+The `odp-deferred` scheme on EVM chains uses EIP-712 signatures to establish a session and authorize per-request receipts. Resource servers or facilitators verify receipts immediately and record them off-chain. Settlement processors later batch receipts into on-chain settlements that enforce a contiguous nonce range and session spend limits. Sessions MAY be settled in multiple partial batches; the session remains open until expiry or maxSpend is reached.
 
 ## `PaymentRequirements` `extra` Fields
 
@@ -209,6 +209,8 @@ Settlement is performed by submitting a batch to the `settlementContract`. In a 
 Implementations MAY verify receipts on-chain directly or by validating a succinct proof (e.g., Groth16) that attests to receipt validity and totals. Regardless of method, the contract MUST enforce the same receipt rules and update `nextNonce` atomically.
 
 Facilitators MAY batch-settle sessions on a schedule of their choosing and perform aggregation internally. Resource servers do not call `/settle` and do not maintain settlement status.
+
+Facilitators MAY submit multiple settlement transactions per session. Each settlement MUST use the current on-chain `nextNonce` and a contiguous nonce range, and MUST NOT overlap any previously settled nonces.
 
 ## Appendix
 

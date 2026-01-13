@@ -39,7 +39,14 @@ const authorizedProcessors = process.env.AUTHORIZED_PROCESSORS
   : [];
 
 const autoSettleIntervalSeconds = Number(process.env.AUTO_SETTLE_INTERVAL_SECONDS || "15");
-const autoSettleAfterSeconds = Number(process.env.AUTO_SETTLE_AFTER_SECONDS || "30");
+const autoSettleMaxReceiptsValue = process.env.AUTO_SETTLE_MAX_RECEIPTS;
+const autoSettleMaxReceipts = autoSettleMaxReceiptsValue
+  ? Number(autoSettleMaxReceiptsValue)
+  : undefined;
+const maxReceiptsPerSettlement =
+  autoSettleMaxReceipts && Number.isFinite(autoSettleMaxReceipts) && autoSettleMaxReceipts > 0
+    ? Math.floor(autoSettleMaxReceipts)
+    : undefined;
 const settlementMode =
   process.env.SETTLEMENT_MODE && process.env.SETTLEMENT_MODE.toLowerCase() === "onchain"
     ? "onchain"
@@ -97,10 +104,14 @@ const facilitatorSigner = toFacilitatorEvmSigner({
 
 const facilitator = new x402Facilitator();
 
-const pendingSessions = new Map<
-  string,
-  { paymentPayload: PaymentPayload; paymentRequirements: PaymentRequirements; lastReceiptAt: number }
->();
+type PendingSession = {
+  paymentPayload: PaymentPayload;
+  paymentRequirements: PaymentRequirements;
+  receiptCount: number;
+  settling: boolean;
+};
+
+const pendingSessions = new Map<string, PendingSession>();
 
 const getSessionIdFromPayload = (payload: PaymentPayload): string | undefined => {
   const receipt = (payload.payload as { receipt?: { sessionId?: string } })?.receipt;
@@ -114,7 +125,7 @@ logger.info("ODP facilitator config", {
   withdrawDelaySeconds,
   settlementMode,
   autoSettleIntervalSeconds,
-  autoSettleAfterSeconds,
+  autoSettleMaxReceipts: maxReceiptsPerSettlement ?? "all",
 });
 
 registerOdpDeferredEvmScheme(facilitator, {
@@ -124,6 +135,7 @@ registerOdpDeferredEvmScheme(facilitator, {
   debitWallet: debitWalletContract,
   withdrawDelaySeconds,
   settlementMode,
+  maxReceiptsPerSettlement,
   logger: schemeLogger,
   authorizedProcessors:
     authorizedProcessors.length > 0
@@ -155,12 +167,18 @@ app.post("/verify", async (req, res) => {
     if (response.isValid) {
       const sessionId = getSessionIdFromPayload(paymentPayload);
       if (sessionId) {
+        const existing = pendingSessions.get(sessionId);
         pendingSessions.set(sessionId, {
           paymentPayload,
           paymentRequirements,
-          lastReceiptAt: Date.now(),
+          receiptCount: existing ? existing.receiptCount + 1 : 1,
+          settling: existing?.settling ?? false,
         });
-        logger.debug("Receipt verified", { sessionId, payer: response.payer });
+        logger.debug("Receipt verified", {
+          sessionId,
+          payer: response.payer,
+          receiptCount: existing ? existing.receiptCount + 1 : 1,
+        });
       }
     } else {
       logger.warn("Receipt verification failed", {
@@ -194,11 +212,33 @@ const runAutoSettlement = async (): Promise<void> => {
     return;
   }
 
-  const now = Date.now();
+  const updateSettling = (sessionId: string, settling: boolean): void => {
+    const current = pendingSessions.get(sessionId);
+    if (!current) {
+      return;
+    }
+    pendingSessions.set(sessionId, { ...current, settling });
+  };
+
   for (const [sessionId, entry] of pendingSessions) {
-    if (now - entry.lastReceiptAt < autoSettleAfterSeconds * 1000) {
+    if (entry.settling) {
       continue;
     }
+
+    if (entry.receiptCount <= 0) {
+      pendingSessions.delete(sessionId);
+      continue;
+    }
+
+    const settleCount = maxReceiptsPerSettlement
+      ? Math.min(entry.receiptCount, maxReceiptsPerSettlement)
+      : entry.receiptCount;
+
+    if (settleCount <= 0) {
+      continue;
+    }
+
+    updateSettling(sessionId, true);
 
     try {
       const response = await facilitator.settle(
@@ -207,11 +247,28 @@ const runAutoSettlement = async (): Promise<void> => {
       );
 
       if (response.success) {
-        pendingSessions.delete(sessionId);
+        const current = pendingSessions.get(sessionId);
+        const remainingReceipts = Math.max(
+          0,
+          (current?.receiptCount ?? entry.receiptCount) - settleCount,
+        );
+
+        if (remainingReceipts === 0) {
+          pendingSessions.delete(sessionId);
+        } else if (current) {
+          pendingSessions.set(sessionId, {
+            ...current,
+            receiptCount: remainingReceipts,
+            settling: false,
+          });
+        }
+
         logger.info("Auto-settled session", {
           sessionId,
           transaction: response.transaction,
           mode: settlementMode,
+          settledReceipts: settleCount,
+          remainingReceipts,
         });
       } else {
         logger.warn("Auto-settlement failed", {
@@ -222,11 +279,13 @@ const runAutoSettlement = async (): Promise<void> => {
       }
     } catch (error) {
       logger.error("Auto-settle error", { sessionId, error });
+    } finally {
+      updateSettling(sessionId, false);
     }
   }
 };
 
-if (autoSettleIntervalSeconds > 0 && autoSettleAfterSeconds >= 0) {
+if (autoSettleIntervalSeconds > 0) {
   setInterval(() => {
     void runAutoSettlement();
   }, autoSettleIntervalSeconds * 1000);
@@ -240,6 +299,6 @@ app.listen(parseInt(PORT, 10), () => {
     withdrawDelaySeconds,
     settlementMode,
     autoSettleIntervalSeconds,
-    autoSettleAfterSeconds,
+    autoSettleMaxReceipts: maxReceiptsPerSettlement ?? "all",
   });
 });
